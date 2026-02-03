@@ -7,7 +7,7 @@ Flow:
 2) Click Claim → navigate to EMC
 3) Accept T&Cs (checkbox) → Continue
 4) Switch to ID option
-5) Enter ID + DOB
+5) Enter ID + DOB (DOB is set via JS to handle hidden/masked input)
 6) Verify the expected error message
 7) Take a screenshot
 8) Email the screenshot inline (always or only on failure, controlled by env)
@@ -126,15 +126,42 @@ def send_via_gmail_smtp(msg: EmailMessage, username: str, password: str, use_por
             server.send_message(msg)
 
 
-# --- Playwright Selectors (ported from your Selenium CSS) ---------------------
+# --- Playwright Selectors -----------------------------------------------------
 
 CLAIM_BTN = ".splash__body_search-doctor"
 CHECKBOX_INPUT = 'input.ui-checkbox__input[name="terms"]'
 CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continue"
 ID_TOGGLE_ICON = ".ui-selection__symbol"
 ID_INPUT = ".qna__input"
-DOB_INPUT = ".qna__input.aDOB"
+DOB_INPUT = ".qna__input.aDOB"          # stays for waits; we’ll set value via JS on [name=dob]
+DOB_NAME_SELECTOR = "input[name='dob']"  # used for JS value set
 ERROR_TEXT_CSS = ".qna__input-error"
+
+
+def set_input_value_js(page, css_selector: str, value: str):
+    """
+    Sets the value via JS and dispatches 'input' and 'change' events so
+    reactive frameworks update their state, even if the element is hidden.
+    """
+    page.wait_for_selector(css_selector, state="attached", timeout=30000)
+    page.evaluate(
+        """([sel, val]) => {
+            const el = document.querySelector(sel);
+            if (!el) throw new Error('Element not found for selector: ' + sel);
+            // Focus the element if possible
+            try { el.focus(); } catch (e) {}
+            // Set value and dispatch events
+            const nativeDescriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+            if (nativeDescriptor && nativeDescriptor.set) {
+                nativeDescriptor.set.call(el, val);
+            } else {
+                el.value = val;
+            }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }""",
+        [css_selector, value],
+    )
 
 
 def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, claim_dob,
@@ -145,58 +172,66 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     """
     observed_error_text = ""
 
-    # Navigate to splash
+    # Navigate to splash (tolerate SPA redirects)
     page.goto(cs_hk_url, wait_until="domcontentloaded")
 
-    # 1) Click Claim Button
-    page.wait_for_selector(CLAIM_BTN, state="visible", timeout=20000)
+    # 1) Click Claim Button (this should route into DoctorSearch/EMC)
+    page.wait_for_selector(CLAIM_BTN, state="visible", timeout=30000)
     page.locator(CLAIM_BTN).scroll_into_view_if_needed()
     page.locator(CLAIM_BTN).click()
     print("Claim button clicked.")
 
+    # ❌ Avoid explicit goto; SPA hash-route often causes ERR_ABORTED.
+    # Instead, wait for the first destination element.
+    try:
+        page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=20000)
+    except Exception:
+        print("Checkbox not visible after click; attempting direct hash-route and retry.")
+        page.evaluate(f"location.href = '{tnc_emc_url}'")
+        page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=30000)
 
     # 2) Click checkbox
-    page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=20000)
     page.locator(CHECKBOX_INPUT).scroll_into_view_if_needed()
-    # 'check' ensures it becomes checked even if hidden under label
     page.locator(CHECKBOX_INPUT).check(force=True)
     print("Checkbox clicked.")
 
     # 3) Continue
-    page.wait_for_selector(CONTINUE_BTN, state="visible", timeout=20000)
+    page.wait_for_selector(CONTINUE_BTN, state="visible", timeout=30000)
     page.locator(CONTINUE_BTN).scroll_into_view_if_needed()
     page.locator(CONTINUE_BTN).click()
     print("Clicked Continue.")
 
     # 4) Select ID option (if multiple, click first)
-    page.wait_for_selector(ID_TOGGLE_ICON, state="visible", timeout=15000)
+    page.wait_for_selector(ID_TOGGLE_ICON, state="visible", timeout=30000)
     page.locator(ID_TOGGLE_ICON).first.scroll_into_view_if_needed()
     page.locator(ID_TOGGLE_ICON).first.click()
     print("Switched to ID entry.")
 
-    # 5) Enter ID
-    page.wait_for_selector(ID_INPUT, state="visible", timeout=15000)
+    # 5) Enter ID (normal fill via Playwright)
+    page.wait_for_selector(ID_INPUT, state="visible", timeout=30000)
     id_box = page.locator(ID_INPUT).first
     id_box.scroll_into_view_if_needed()
     id_box.fill("")
     id_box.fill(claim_id)
     id_box.press("Enter")
     print("Entered ID.")
-    time.sleep(1.0)
+    time.sleep(0.8)
 
-    # 6) Enter DOB
-    page.wait_for_selector(DOB_INPUT, state="visible", timeout=15000)
-    dob_box = page.locator(DOB_INPUT).first
-    dob_box.scroll_into_view_if_needed()
-    dob_box.fill("")
-    dob_box.fill(claim_dob)
-    dob_box.press("Enter")
-    print("Entered DOB.")
-    time.sleep(1.0)
+    # 6) Enter DOB (hidden/masked input → set via JS and fire events)
+    # Wait until the input is at least attached to the DOM.
+    page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
+    set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
+    # Optional: press Enter on the nearest visible form control to simulate submission/blur
+    try:
+        page.keyboard.press("Enter")
+    except Exception:
+        pass
+    print("Entered DOB via JS.")
+    time.sleep(0.8)
 
     # Wait for potential error message to render
     try:
-        el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=10000)
+        el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=15000)
         observed_error_text = (el.inner_text() or "").strip()
         print("Observed error text:", observed_error_text)
     except PlaywrightTimeout:
