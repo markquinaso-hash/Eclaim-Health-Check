@@ -74,6 +74,7 @@ def build_message_with_inline_image(
     cid = make_msgid(domain="inline")  # e.g., <...@inline>
     cid_no_brackets = cid[1:-1]        # strip < >
 
+    # Proper HTML with an inline image referencing the CID
     html_body = f"""
     <html>
       <body style="font-family:Segoe UI, Arial, sans-serif;">
@@ -133,7 +134,7 @@ CHECKBOX_INPUT = 'input.ui-checkbox__input[name="terms"]'
 CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continue"
 ID_TOGGLE_ICON = ".ui-selection__symbol"
 ID_INPUT = ".qna__input"
-DOB_INPUT = ".qna__input.aDOB"          # stays for waits; we’ll set value via JS on [name=dob]
+DOB_INPUT = ".qna__input.aDOB"           # keep for visibility checks if needed
 DOB_NAME_SELECTOR = "input[name='dob']"  # used for JS value set
 ERROR_TEXT_CSS = ".qna__input-error"
 
@@ -148,9 +149,7 @@ def set_input_value_js(page, css_selector: str, value: str):
         """([sel, val]) => {
             const el = document.querySelector(sel);
             if (!el) throw new Error('Element not found for selector: ' + sel);
-            // Focus the element if possible
             try { el.focus(); } catch (e) {}
-            // Set value and dispatch events
             const nativeDescriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
             if (nativeDescriptor && nativeDescriptor.set) {
                 nativeDescriptor.set.call(el, val);
@@ -181,7 +180,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     page.locator(CLAIM_BTN).click()
     print("Claim button clicked.")
 
-    # ❌ Avoid explicit goto; SPA hash-route often causes ERR_ABORTED.
+    # Avoid explicit goto; SPA hash-route often causes ERR_ABORTED.
     # Instead, wait for the first destination element.
     try:
         page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=20000)
@@ -218,12 +217,10 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     time.sleep(0.8)
 
     # 6) Enter DOB (hidden/masked input → set via JS and fire events)
-    # Wait until the input is at least attached to the DOM.
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
     set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
-    # Optional: press Enter on the nearest visible form control to simulate submission/blur
     try:
-        page.keyboard.press("Enter")
+        page.keyboard.press("Enter")  # simulate submit/blur
     except Exception:
         pass
     print("Entered DOB via JS.")
@@ -257,8 +254,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
 @pytest.fixture(scope="session")
 def config():
     """
-    Collect all configuration from environment variables (with safe defaults),
-    mirroring the previous script behavior.
+    Collect all configuration from environment variables (with safe defaults).
     """
     cfg = {}
 
@@ -272,7 +268,7 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
+    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000\n")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
 
     # Assertion text
