@@ -1,0 +1,30 @@
+name: test_email_only
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  send_email:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Run email test (capture console)
+        env:
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+        run: |
+          set -o pipefail
+          python send_email.py | tee smtp_console.log
+
+      - name: Upload SMTP logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: smtp-logs
+          path: smtp_console.log
+          if-no-files-found: warn
