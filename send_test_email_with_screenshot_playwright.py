@@ -1,55 +1,358 @@
-name: Email Inline Screenshot (Playwright)
+# -*- coding: utf-8 -*-
+"""
+Playwright version of the Selenium workflow + Inline Screenshot Email.
 
-on:
-  push:
-    branches: [ main ]
+Flow:
+1) Open ClaimSimple HK
+2) Click Claim → navigate to EMC
+3) Accept T&Cs (checkbox) → Continue
+4) Switch to ID option
+5) Enter ID + DOB
+6) Verify the expected error message
+7) Take a screenshot
+8) Email the screenshot inline (always or only on failure, controlled by env)
 
-jobs:
-  send-email:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+Author: MJ
+"""
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+import os
+import ssl
+import time
+from datetime import datetime
+from email.message import EmailMessage
+from email.utils import make_msgid
 
-      - name: Install Python dependencies (Playwright + pytest + dotenv)
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install playwright pytest python-dotenv
+import pytest
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
-      - name: Install Playwright browsers (Chromium) + OS deps
-        run: |
-          python -m playwright install --with-deps chromium
+# Optional .env support
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
-      - name: Run pytest (Playwright)
-        env:
-          # Gmail SMTP (use App Password!)
-          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          TO_EMAIL:      ${{ secrets.TO_EMAIL }}
+# --- Email / Env Utilities ----------------------------------------------------
 
-          # Browser behavior
-          HEADLESS: "true"
-          WINDOW_W: "1366"
-          WINDOW_H: "900"
+REQUIRED_VARS = ["SMTP_USERNAME", "SMTP_PASSWORD", "TO_EMAIL"]
 
-          # App inputs
-          CS_HK_URL: "https://www.claimsimple.hk/#/"
-          TNC_EMC_URL: "https://www.claimsimple.hk/DoctorSearch#/"
-          CLAIM_ID: "A0000000"
-          CLAIM_DOB: "01/01/1990"
-          EXPECTED_ERROR_TEXT: "The information you provided does not match our records. Please try again."
 
-          # Email behavior + content
-          ALWAYS_EMAIL: "true"
-          EMAIL_ON_FAILURE: "true"
-          USE_SSL_465: "false"
-          SUBJECT: "ClaimSimple HK Check – Inline Screenshot"
-          BODY: "Hello from CI. Inline screenshot attached below."
-          SCREENSHOT_PATH: "screenshot.png"
-        run: |
-          pytest -q -s send_test_email_with_screenshot_playwright.py
+def get_env(name: str) -> str:
+    val = os.getenv(name)
+    if not val:
+        missing = [v for v in REQUIRED_VARS if not os.getenv(v)]
+        raise RuntimeError(
+            f"Missing required environment variable: {name}\n"
+            f"Currently missing: {', '.join(missing)}"
+        )
+    return val
+
+
+def build_message_with_inline_image(
+    from_email: str,
+    to_email: str,
+    subject: str,
+    text_body: str,
+    html_intro: str,
+    image_path: str,
+    image_subtype: str = "png",
+) -> EmailMessage:
+    """
+    Creates a multipart/alternative + related email:
+      - text/plain part
+      - text/html part referencing inline image via CID
+    """
+    msg = EmailMessage()
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    # Plain text fallback
+    msg.set_content(text_body)
+
+    # Generate a CID for the image
+    cid = make_msgid(domain="inline")  # e.g., <...@inline>
+    cid_no_brackets = cid[1:-1]        # strip < >
+
+    html_body = f"""
+    <html>
+      <body style="font-family:Segoe UI, Arial, sans-serif;">
+        <p>{html_intro}</p>
+        <p>
+          <img src="cid:{cid_no_brackets}" alt="Screenshot"
+               style="max-width:100%; height:auto; border:1px solid #ddd;"/>
+        </p>
+      </body>
+    </html>
+    """
+
+    # Add HTML alternative
+    msg.add_alternative(html_body, subtype="html")
+
+    # Attach the image as a related part to the HTML (part index 1)
+    with open(image_path, "rb") as f:
+        msg.get_payload()[1].add_related(
+            f.read(),
+            maintype="image",
+            subtype=image_subtype,
+            cid=cid,
+            filename=os.path.basename(image_path),
+        )
+    return msg
+
+
+def send_via_gmail_smtp(msg: EmailMessage, username: str, password: str, use_port_465=False):
+    """
+    Sends the message via Gmail SMTP.
+    - Default: STARTTLS on 587
+    - Optionally: implicit SSL on 465
+    """
+    smtp_server = "smtp.gmail.com"
+    if use_port_465:
+        port = 465
+        context = ssl.create_default_context()
+        import smtplib
+        with smtplib.SMTP_SSL(smtp_server, port, context=context, timeout=60) as server:
+            server.login(username, password)
+            server.send_message(msg)
+    else:
+        port = 587
+        import smtplib
+        with smtplib.SMTP(smtp_server, port, timeout=60) as server:
+            server.ehlo()
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+            server.login(username, password)
+            server.send_message(msg)
+
+
+# --- Playwright Selectors (ported from your Selenium CSS) ---------------------
+
+CLAIM_BTN = ".splash__body_search-doctor"
+CHECKBOX_INPUT = 'input.ui-checkbox__input[name="terms"]'
+CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continue"
+ID_TOGGLE_ICON = ".ui-selection__symbol"
+ID_INPUT = ".qna__input"
+DOB_INPUT = ".qna__input.aDOB"
+ERROR_TEXT_CSS = ".qna__input-error"
+
+
+def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, claim_dob,
+                                    expected_error_text, screenshot_path) -> str:
+    """
+    Runs the ClaimSimple HK flow and takes a screenshot at the end.
+    Returns the observed error text (if found).
+    """
+    observed_error_text = ""
+
+    # Navigate to splash
+    page.goto(cs_hk_url, wait_until="domcontentloaded")
+
+    # 1) Click Claim Button
+    page.wait_for_selector(CLAIM_BTN, state="visible", timeout=20000)
+    page.locator(CLAIM_BTN).scroll_into_view_if_needed()
+    page.locator(CLAIM_BTN).click()
+    print("Claim button clicked.")
+
+    # Navigate to EMC (direct)
+    page.goto(tnc_emc_url, wait_until="domcontentloaded")
+
+    # 2) Click checkbox
+    page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=20000)
+    page.locator(CHECKBOX_INPUT).scroll_into_view_if_needed()
+    # 'check' ensures it becomes checked even if hidden under label
+    page.locator(CHECKBOX_INPUT).check(force=True)
+    print("Checkbox clicked.")
+
+    # 3) Continue
+    page.wait_for_selector(CONTINUE_BTN, state="visible", timeout=20000)
+    page.locator(CONTINUE_BTN).scroll_into_view_if_needed()
+    page.locator(CONTINUE_BTN).click()
+    print("Clicked Continue.")
+
+    # 4) Select ID option (if multiple, click first)
+    page.wait_for_selector(ID_TOGGLE_ICON, state="visible", timeout=15000)
+    page.locator(ID_TOGGLE_ICON).first.scroll_into_view_if_needed()
+    page.locator(ID_TOGGLE_ICON).first.click()
+    print("Switched to ID entry.")
+
+    # 5) Enter ID
+    page.wait_for_selector(ID_INPUT, state="visible", timeout=15000)
+    id_box = page.locator(ID_INPUT).first
+    id_box.scroll_into_view_if_needed()
+    id_box.fill("")
+    id_box.fill(claim_id)
+    id_box.press("Enter")
+    print("Entered ID.")
+    time.sleep(1.0)
+
+    # 6) Enter DOB
+    page.wait_for_selector(DOB_INPUT, state="visible", timeout=15000)
+    dob_box = page.locator(DOB_INPUT).first
+    dob_box.scroll_into_view_if_needed()
+    dob_box.fill("")
+    dob_box.fill(claim_dob)
+    dob_box.press("Enter")
+    print("Entered DOB.")
+    time.sleep(1.0)
+
+    # Wait for potential error message to render
+    try:
+        el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=10000)
+        observed_error_text = (el.inner_text() or "").strip()
+        print("Observed error text:", observed_error_text)
+    except PlaywrightTimeout:
+        print("No error message element found within timeout.")
+
+    # Assert if EXPECTED_TEXT provided
+    if expected_error_text:
+        assert observed_error_text == expected_error_text, (
+            f"Error - Expected text not found.\n"
+            f"Expected: {expected_error_text}\n"
+            f"Actual:   {observed_error_text}"
+        )
+
+    # Save screenshot
+    page.screenshot(path=screenshot_path, full_page=True)
+    print(f"Screenshot saved to {screenshot_path}")
+
+    return observed_error_text
+
+
+# --- Pytest Fixtures ----------------------------------------------------------
+
+@pytest.fixture(scope="session")
+def config():
+    """
+    Collect all configuration from environment variables (with safe defaults),
+    mirroring the previous script behavior.
+    """
+    cfg = {}
+
+    # Browser
+    cfg["HEADLESS"] = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
+    cfg["WINDOW_W"] = int(os.getenv("WINDOW_W", "1366"))
+    cfg["WINDOW_H"] = int(os.getenv("WINDOW_H", "900"))
+
+    # URLs (overridable via env)
+    cfg["CS_HK_URL"] = os.getenv("CS_HK_URL", "https://www.claimsimple.hk/#/")
+    cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
+
+    # Inputs
+    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
+    cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
+
+    # Assertion text
+    cfg["EXPECTED_ERROR_TEXT"] = os.getenv(
+        "EXPECTED_ERROR_TEXT",
+        "The information you provided does not match our records. Please try again."
+    )
+
+    # Output
+    cfg["SCREENSHOT_PATH"] = os.getenv("SCREENSHOT_PATH", "screenshot.png")
+
+    # Email controls
+    cfg["SMTP_USERNAME"] = get_env("SMTP_USERNAME")
+    cfg["SMTP_PASSWORD"] = get_env("SMTP_PASSWORD")
+    cfg["TO_EMAIL"] = get_env("TO_EMAIL")
+    cfg["USE_SSL_465"] = os.getenv("USE_SSL_465", "false").lower() in ("1", "true", "yes")
+
+    # Email policy
+    cfg["ALWAYS_EMAIL"] = os.getenv("ALWAYS_EMAIL", "true").lower() in ("1", "true", "yes")
+    cfg["EMAIL_ON_FAILURE"] = os.getenv("EMAIL_ON_FAILURE", "true").lower() in ("1", "true", "yes")
+
+    # Email content
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "ClaimSimple HK Check – Inline Screenshot")
+    cfg["HTML_INTRO_BASE"] = os.getenv(
+        "BODY",
+        f"Hello! Here is the screenshot from the automated ClaimSimple HK flow "
+        f"(ID/DOB verification).<br><strong>Timestamp:</strong> {now}"
+    )
+    cfg["TEXT_BODY"] = (
+        "This email contains an inline screenshot of the automated ClaimSimple HK flow. "
+        "If you can't see it, open in an HTML-capable client."
+    )
+    return cfg
+
+
+@pytest.fixture
+def page(config):
+    """
+    Provide a Playwright page with headless toggle and viewport sizing from config.
+    """
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=config["HEADLESS"])
+        context = browser.new_context(
+            viewport={"width": config["WINDOW_W"], "height": config["WINDOW_H"]},
+            ignore_https_errors=True,
+        )
+        pg = context.new_page()
+        yield pg
+        try:
+            context.close()
+        finally:
+            browser.close()
+
+
+# --- The Test ----------------------------------------------------------------
+
+def test_claimsimple_id_dob_flow_screenshot_email(page, config):
+    """
+    Executes the ClaimSimple flow, asserts the expected error text,
+    saves a screenshot, and emails the result inline.
+    """
+    screenshot_path = config["SCREENSHOT_PATH"]
+    observed_error = ""
+    test_failed = False
+    failure_reason = None
+
+    try:
+        observed_error = run_claimsimple_flow_playwright(
+            page,
+            cs_hk_url=config["CS_HK_URL"],
+            tnc_emc_url=config["TNC_EMC_URL"],
+            claim_id=config["CLAIM_ID"],
+            claim_dob=config["CLAIM_DOB"],
+            expected_error_text=config["EXPECTED_ERROR_TEXT"],
+            screenshot_path=screenshot_path,
+        )
+    except Exception as e:
+        test_failed = True
+        failure_reason = str(e)
+        # Best-effort: capture a screenshot on failure path
+        try:
+            page.screenshot(path=screenshot_path, full_page=True)
+        except Exception:
+            pass
+        raise
+    finally:
+        # Decide whether to send the email
+        should_email = config["ALWAYS_EMAIL"] or (test_failed and config["EMAIL_ON_FAILURE"])
+
+        if should_email and os.path.exists(screenshot_path):
+            status = "FAILED" if test_failed else "PASSED"
+            subject = f"[{status}] {config['SUBJECT_BASE']}"
+
+            html_intro = config["HTML_INTRO_BASE"]
+            if observed_error:
+                html_intro = f"{html_intro}<br><strong>Observed error:</strong> {observed_error}"
+            if failure_reason:
+                html_intro = f"{html_intro}<br><strong>Failure reason:</strong> {failure_reason}"
+
+            msg = build_message_with_inline_image(
+                from_email=config["SMTP_USERNAME"],
+                to_email=config["TO_EMAIL"],
+                subject=subject,
+                text_body=config["TEXT_BODY"],
+                html_intro=html_intro,
+                image_path=screenshot_path,
+                image_subtype="png",
+            )
+            send_via_gmail_smtp(
+                msg,
+                config["SMTP_USERNAME"],
+                config["SMTP_PASSWORD"],
+                use_port_465=config["USE_SSL_465"],
+            )
+            print(f"✅ Email with inline screenshot sent to {config['TO_EMAIL']}")

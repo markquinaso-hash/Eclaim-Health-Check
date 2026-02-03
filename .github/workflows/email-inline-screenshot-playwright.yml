@@ -3,6 +3,7 @@ name: Email Inline Screenshot (Playwright)
 on:
   push:
     branches: [ main ]
+  workflow_dispatch: {}  # enables manual runs from the Actions tab
 
 jobs:
   send-email:
