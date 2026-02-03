@@ -6,6 +6,7 @@ on:
 jobs:
   send_email:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -13,14 +14,26 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Run email test (capture console)
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt || \
+          pip install selenium pytest python-dotenv webdriver-manager
+
+      - name: Run pytest (capture console)
         env:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
+
+          # Optional envs:
+          HEADLESS: "true"
+          ALWAYS_EMAIL: "true"
+          EMAIL_ON_FAILURE: "true"
+          USE_WEBDRIVER_MANAGER: "true"
+
         run: |
           set -o pipefail
-          python send_email.py | tee smtp_console.log
+          pytest -q test_claimsimple_email.py | tee smtp_console.log
 
       - name: Upload SMTP logs
         uses: actions/upload-artifact@v4
