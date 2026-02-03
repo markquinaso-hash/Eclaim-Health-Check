@@ -268,7 +268,7 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000\n")
+    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
 
     # Assertion text
