@@ -154,8 +154,6 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     page.locator(CLAIM_BTN).click()
     print("Claim button clicked.")
 
-    # Navigate to EMC (direct)
-    page.goto(tnc_emc_url, wait_until="domcontentloaded")
 
     # 2) Click checkbox
     page.wait_for_selector(CHECKBOX_INPUT, state="visible", timeout=20000)
