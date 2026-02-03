@@ -16,24 +16,23 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt || \
-          pip install selenium pytest python-dotenv webdriver-manager
+          pip install --upgrade pip
+          # If you later add a requirements.txt, replace with:
+          # pip install -r requirements.txt
+          pip install selenium python-dotenv webdriver-manager pytest
 
-      - name: Run pytest (capture console)
+      - name: Run email test (capture console)
         env:
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
 
-          # Optional envs:
+          # Optional envs used by your script (only if your script reads them)
           HEADLESS: "true"
-          ALWAYS_EMAIL: "true"
-          EMAIL_ON_FAILURE: "true"
           USE_WEBDRIVER_MANAGER: "true"
-
         run: |
           set -o pipefail
-          pytest -q test_claimsimple_email.py | tee smtp_console.log
+          python send_test_email_with_screenshot.py | tee smtp_console.log
 
       - name: Upload SMTP logs
         uses: actions/upload-artifact@v4
@@ -41,3 +40,10 @@ jobs:
           name: smtp-logs
           path: smtp_console.log
           if-no-files-found: warn
+
+      - name: Upload screenshot (if exists)
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot
+          path: screenshot.png
+          if-no-files-found: ignore
