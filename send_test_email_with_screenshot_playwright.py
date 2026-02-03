@@ -1,4 +1,4 @@
-name: Email Inline Screenshot (Selenium)
+name: Email Inline Screenshot (Playwright)
 
 on:
   push:
@@ -11,41 +11,31 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Show workspace files
-        run: |
-          pwd
-          ls -la
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Google Chrome
-        id: setup-chrome
-        uses: browser-actions/setup-chrome@v1
-        with:
-          chrome-version: stable
-
-      - name: Show Chrome version
-        run: |
-          "${{ steps.setup-chrome.outputs.chrome-path }}" --version || true
-
-      - name: Install Python dependencies (Selenium + pytest + dotenv)
+      - name: Install Python dependencies (Playwright + pytest + dotenv)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install selenium pytest python-dotenv webdriver-manager
+          python -m pip install playwright pytest python-dotenv
 
-      - name: Run pytest
+      - name: Install Playwright browsers (Chromium) + OS deps
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: Run pytest (Playwright)
         env:
-          # Gmail SMTP (use App Password for reliability)
+          # Gmail SMTP (use App Password!)
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           TO_EMAIL:      ${{ secrets.TO_EMAIL }}
 
-          # Selenium/browser
-          CHROME_BINARY: ${{ steps.setup-chrome.outputs.chrome-path }}
+          # Browser behavior
           HEADLESS: "true"
+          WINDOW_W: "1366"
+          WINDOW_H: "900"
 
           # App inputs
           CS_HK_URL: "https://www.claimsimple.hk/#/"
@@ -62,4 +52,4 @@ jobs:
           BODY: "Hello from CI. Inline screenshot attached below."
           SCREENSHOT_PATH: "screenshot.png"
         run: |
-          pytest -q -s send_test_email_with_screenshot.py
+          pytest -q -s send_test_email_with_screenshot_playwright.py
