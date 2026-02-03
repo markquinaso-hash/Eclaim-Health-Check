@@ -81,7 +81,7 @@ def build_message_with_inline_image(
         <p>{html_intro}</p>
         <p>
           <img src="cid:{cid_no_brackets}" alt="Screenshot"
-               style="max-width:100%; height:auto; border:1px solid #ddd;" />
+               style="max-width:100%; height:auto; border:1px solid #ddd;"/>
         </p>
       </body>
     </html>
@@ -206,76 +206,43 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     page.locator(ID_TOGGLE_ICON).first.click()
     print("Switched to ID entry.")
 
-    # 5) Enter ID (type allows newline '\n' at end to simulate Enter if present)
+    # 5) Enter ID (normal fill via Playwright)
     page.wait_for_selector(ID_INPUT, state="visible", timeout=30000)
     id_box = page.locator(ID_INPUT).first
     id_box.scroll_into_view_if_needed()
     id_box.fill("")
-    id_box.type(claim_id)  # default CLAIM_ID includes '\n' to press Enter
+    id_box.fill(claim_id)
+    id_box.press("Enter")
     print("Entered ID.")
     time.sleep(0.8)
 
     # 6) Enter DOB (hidden/masked input → set via JS and fire events)
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
     set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
-
-    # Trigger validation: blur DOB and click Continue (if available) or press Enter
     try:
-        page.locator(DOB_NAME_SELECTOR).evaluate("el => el.blur()")
+        page.keyboard.press("Enter")  # simulate submit/blur
     except Exception:
         pass
-    try:
-        page.locator(CONTINUE_BTN).click(timeout=2000)
-    except Exception:
-        try:
-            page.keyboard.press("Enter")
-        except Exception:
-            pass
+    print("Entered DOB via JS.")
+    time.sleep(0.8)
 
-    print("DOB set and validation triggered.")
-    time.sleep(1.0)
-
-    # 7) Wait for potential error message to render (primary + fallbacks)
+    # Wait for potential error message to render
     try:
         el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=15000)
         observed_error_text = (el.inner_text() or "").strip()
-        print("Observed error text (primary):", observed_error_text)
+        print("Observed error text:", observed_error_text)
     except PlaywrightTimeout:
-        print("Primary selector timed out; trying fallbacks.")
+        print("No error message element found within timeout.")
 
-    # Fallback 1: by distinctive fragment
-    if not observed_error_text:
-        try:
-            frag = "The information you provided does not match"
-            el2 = page.locator(f"text={frag}").first
-            el2.wait_for(state="visible", timeout=8000)
-            observed_error_text = (el2.inner_text() or "").strip()
-            print("Observed error text (fallback text=):", observed_error_text)
-        except Exception:
-            pass
-
-    # Fallback 2: broader containers (alerts/messages)
-    if not observed_error_text:
-        try:
-            broad = page.locator(".qna, .ui-message, [role='alert'], [aria-live]")
-            texts = [t.strip() for t in broad.all_inner_texts()]
-            observed_error_text = max(texts, key=len) if texts else ""
-            if observed_error_text:
-                print("Observed error text (fallback broad):", observed_error_text)
-        except Exception:
-            pass
-
-    # 8) Assert (tolerant substring match)
+    # Assert if EXPECTED_TEXT provided
     if expected_error_text:
-        exp = expected_error_text.strip().lower()
-        act = (observed_error_text or "").strip().lower()
-        assert exp in act or act in exp, (
-            "Error - Expected text not found.\n"
-            f"Expected contains: {expected_error_text}\n"
-            f"Actual:            {observed_error_text}"
+        assert observed_error_text == expected_error_text, (
+            f"Error - Expected text not found.\n"
+            f"Expected: {expected_error_text}\n"
+            f"Actual:   {observed_error_text}"
         )
 
-    # 9) Save screenshot
+    # Save screenshot
     page.screenshot(path=screenshot_path, full_page=True)
     print(f"Screenshot saved to {screenshot_path}")
 
@@ -301,8 +268,7 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    # NOTE: default ends with '\n' to press Enter immediately after typing ID
-    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000\n")
+     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000\n")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
 
     # Assertion text
@@ -419,4 +385,3 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
                 use_port_465=config["USE_SSL_465"],
             )
             print(f"✅ Email with inline screenshot sent to {config['TO_EMAIL']}")
-``
