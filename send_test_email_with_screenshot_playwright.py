@@ -269,8 +269,10 @@ def config():
 
     # Inputs
     
-    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
-    cfg["CLAIM_ID_PRESS_ENTER"] = os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
+   
+    id_box.fill("")
+    id_box.type(config["CLAIM_ID"])  # just the ID
+    id_box.press("Enter")            # press Enter as an action
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
 
     # Assertion text
