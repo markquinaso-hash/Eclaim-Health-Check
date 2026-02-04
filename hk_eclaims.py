@@ -575,7 +575,7 @@ def test_all_flows_single_email(page, config):
             "cs_hk_url": config["CS_HK_URL3"],
             "tnc_url": config["TNC_EMC_URL3"],
             "claim_btn_selector": ".splash__body_make-claim",
-            "continue_btn_selector": ".button-primary.button-primary--full.button-doctorsearch-continu",
+            "continue_btn_selector": ".button-primary.button-primary--full.button-doctorsearch-continue",
             "screenshot": config["SHOT3"],
             "html_intro": config["BODY3"],
         },
