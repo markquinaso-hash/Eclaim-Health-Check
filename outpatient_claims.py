@@ -442,7 +442,7 @@ def config():
 
     # URLs (overridable via env)
     cfg["CS_HK_URL"] = os.getenv("CS_HK_URL", "https://www.claimsimple.hk/#/")
-    cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
+    cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/#/tnc")
 
     # Inputs
     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
