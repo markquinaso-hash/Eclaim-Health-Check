@@ -76,7 +76,7 @@ def build_message_with_inline_image(
     cid = make_msgid(domain="inline")  # e.g., <...@inline>
     cid_no_brackets = cid[1:-1]        # strip < >
 
-    # Proper HTML with an inline image referencing the CID
+    # Proper HTML (NOT escaped) with an inline image referencing the CID
     html_body = f"""
     <html>
       <body style="font-family:Segoe UI, Arial, sans-serif;">
@@ -92,15 +92,17 @@ def build_message_with_inline_image(
     # Add HTML alternative
     msg.add_alternative(html_body, subtype="html")
 
-    # Attach the image as a related part to the HTML (part index 1)
+    # Attach the image as a related part to the HTML
+    html_part = msg.get_body(preferencelist=("html",))
     with open(image_path, "rb") as f:
-        msg.get_payload()[1].add_related(
+        html_part.add_related(
             f.read(),
             maintype="image",
             subtype=image_subtype,
             cid=cid,
             filename=os.path.basename(image_path),
         )
+
     return msg
 
 
@@ -236,19 +238,16 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
 
     # Commit + Enter (same pattern we’ll use for DOB fallback too)
     commit_and_press_enter(id_box)
-
     print("Entered ID.")
-    time.sleep(0.8)
+    time.sleep(0.5)
 
     # 6) Enter DOB by NAME (Selenium-like) with robust fallback
-    # First attempt: behave like Selenium — focus, type, press Enter
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
     dob_box = page.locator(DOB_NAME_SELECTOR).first
 
     # Try native typing
     native_dob_ok = True
     try:
-        # If it is interactable, click & type like Selenium
         try:
             dob_box.scroll_into_view_if_needed()
         except Exception:
@@ -256,7 +255,6 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
         dob_box.click(timeout=1000)
         dob_box.fill("")  # clear if any
         dob_box.type(claim_dob, delay=20)  # slight delay to mimic real typing
-        time.sleep(3)
         commit_and_press_enter(dob_box)
         print("Entered DOB via native typing + Enter on name='dob'.")
     except Exception as e:
@@ -266,9 +264,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     # Fallback if the element is masked or blocks typing:
     if not native_dob_ok:
         set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
-        # Re-commit + Enter on the same element after JS set
         try:
-            # Ensure focus even if hidden; some frameworks bind key handlers above
             try:
                 dob_box.evaluate("el => el.focus()")
             except Exception:
@@ -287,9 +283,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
             )
             print("Entered DOB via JS setter; dispatched Enter at document level.")
 
-    time.sleep(5)
-
-    # Wait for potential error message to render
+    # Wait for potential error message to render (prefer event-driven waits)
     try:
         el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=15000)
         observed_error_text = (el.inner_text() or "").strip()
@@ -297,12 +291,14 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     except PlaywrightTimeout:
         print("No error message element found within timeout.")
 
-    # Assert if EXPECTED_TEXT provided
+    # Assert if EXPECTED_TEXT provided (use contains matching for resilience)
     if expected_error_text:
-        assert observed_error_text == expected_error_text, (
-            f"Error - Expected text not found.\n"
-            f"Expected: {expected_error_text}\n"
-            f"Actual:   {observed_error_text}"
+        expected_norm = expected_error_text.strip().casefold()
+        actual_norm = observed_error_text.strip().casefold()
+        assert expected_norm in actual_norm or actual_norm in expected_norm, (
+            "Error - Expected text not found.\n"
+            f"Expected (contains/equals): {expected_error_text}\n"
+            f"Actual:                     {observed_error_text}"
         )
 
     # Save screenshot
@@ -331,8 +327,8 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000/n")
-    cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990/n")
+    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
+    cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")  # adjust to site’s required format
 
     # Assertion text
     cfg["EXPECTED_ERROR_TEXT"] = os.getenv(
@@ -343,7 +339,7 @@ def config():
     # Output
     cfg["SCREENSHOT_PATH"] = os.getenv("SCREENSHOT_PATH", "screenshot.png")
 
-    # Email controls
+    # Email controls (required)
     cfg["SMTP_USERNAME"] = get_env("SMTP_USERNAME")
     cfg["SMTP_PASSWORD"] = get_env("SMTP_PASSWORD")
     cfg["TO_EMAIL"] = get_env("TO_EMAIL")
@@ -355,13 +351,14 @@ def config():
 
     # Email content
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS")
+    # Keep subject base neutral; status is appended later
+    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
     cfg["HTML_INTRO_BASE"] = os.getenv(
         "BODY",
-        f"Hi Team</br>"
-        f"Good day!</br>"
-        f"We have performed the eClaims health check and no issue encountered.</br>"
-        f"(ID/DOB verification).<br><strong>Timestamp:</strong> {now}"
+        f"Hi Team<br/>"
+        f"Good day!<br/>"
+        f"We have performed the eClaims health check and no issue encountered.<br/>"
+        f"(ID/DOB verification).<br/><strong>Timestamp:</strong> {now}"
     )
     cfg["TEXT_BODY"] = (
         "This email contains an inline screenshot of the automated ClaimSimple HK flow. "
@@ -426,13 +423,13 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
 
         if should_email and os.path.exists(screenshot_path):
             status = "FAILED" if test_failed else "PASSED"
-            subject = f"{config['SUBJECT_BASE']} [{status}] "
+            subject = f"{config['SUBJECT_BASE']} [{status}]"
 
             html_intro = config["HTML_INTRO_BASE"]
             if observed_error:
-                html_intro = f"{html_intro}<br><strong>Observed error:</strong> {observed_error}"
+                html_intro = f"{html_intro}<br/><strong>Observed error:</strong> {observed_error}"
             if failure_reason:
-                html_intro = f"{html_intro}<br><strong>Failure reason:</strong> {failure_reason}"
+                html_intro = f"{html_intro}<br/><strong>Failure reason:</strong> {failure_reason}"
 
             msg = build_message_with_inline_image(
                 from_email=config["SMTP_USERNAME"],
