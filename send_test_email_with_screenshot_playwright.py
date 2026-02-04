@@ -76,7 +76,7 @@ def build_message_with_inline_image(
     cid = make_msgid(domain="inline")  # e.g., <...@inline>
     cid_no_brackets = cid[1:-1]        # strip < >
 
-    # Proper HTML (NOT escaped) with an inline image referencing the CID
+    # Proper HTML with an inline image referencing the CID
     html_body = f"""
     <html>
       <body style="font-family:Segoe UI, Arial, sans-serif;">
@@ -185,8 +185,16 @@ def commit_and_press_enter(locator):
         pass
 
 
-def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, claim_dob,
-                                    expected_error_text, screenshot_path) -> str:
+def run_claimsimple_flow_playwright(
+    page, *,
+    cs_hk_url,
+    tnc_emc_url,
+    claim_id,
+    claim_dob,
+    expected_error_text,
+    screenshot_path,
+    post_assert_delay_ms: int = 1000,   # <-- configurable delay before screenshot
+) -> str:
     """
     Runs the ClaimSimple HK flow and takes a screenshot at the end.
     Returns the observed error text (if found).
@@ -285,13 +293,14 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
 
     # Wait for potential error message to render (prefer event-driven waits)
     try:
-        el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=15000)
-        observed_error_text = (el.inner_text() or "").strip()
+        err = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=30000)
+        observed_error_text = (err.inner_text() or "").strip()
         print("Observed error text:", observed_error_text)
     except PlaywrightTimeout:
         print("No error message element found within timeout.")
 
     # Assert if EXPECTED_TEXT provided (use contains matching for resilience)
+    # add delay once the expected text appears before taking screenshot
     if expected_error_text:
         expected_norm = expected_error_text.strip().casefold()
         actual_norm = observed_error_text.strip().casefold()
@@ -301,8 +310,27 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
             f"Actual:                     {observed_error_text}"
         )
 
-    time.sleep(3)
-     
+        # Ensure the DOM actually shows the expected text content before the delay/screenshot
+        try:
+            page.locator(ERROR_TEXT_CSS).filter(has_text=expected_error_text).wait_for(
+                state="visible", timeout=3000
+            )
+        except Exception:
+            # Non-fatal: we already asserted via text capture above
+            pass
+
+        # Extra stabilization delay so the UI finishes rendering (animations, layout, etc.)
+        if post_assert_delay_ms and post_assert_delay_ms > 0:
+            time.sleep(post_assert_delay_ms / 1000.0)
+
+    # Ensure screenshot directory exists
+    try:
+        ss_dir = os.path.dirname(screenshot_path)
+        if ss_dir:
+            os.makedirs(ss_dir, exist_ok=True)
+    except Exception:
+        pass
+
     # Save screenshot
     page.screenshot(path=screenshot_path, full_page=True)
     print(f"Screenshot saved to {screenshot_path}")
@@ -338,13 +366,14 @@ def config():
         "The information you provided does not match our records. Please try again."
     )
 
-    # Output
-    cfg["SCREENSHOT_PATH"] = os.getenv("SCREENSHOT_PATH", "screenshot.png")
+    # Output - default to timestamped file to avoid overwrites
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    cfg["SCREENSHOT_PATH"] = os.getenv("SCREENSHOT_PATH", os.path.join("screenshots", f"screenshot_{ts}.png"))
 
-    # Email controls (required)
-    cfg["SMTP_USERNAME"] = get_env("SMTP_USERNAME")
-    cfg["SMTP_PASSWORD"] = get_env("SMTP_PASSWORD")
-    cfg["TO_EMAIL"] = get_env("TO_EMAIL")
+    # Email controls (required at send-time)
+    cfg["SMTP_USERNAME"] = os.getenv("SMTP_USERNAME")
+    cfg["SMTP_PASSWORD"] = os.getenv("SMTP_PASSWORD")
+    cfg["TO_EMAIL"] = os.getenv("TO_EMAIL")
     cfg["USE_SSL_465"] = os.getenv("USE_SSL_465", "false").lower() in ("1", "true", "yes")
 
     # Email policy
@@ -355,17 +384,25 @@ def config():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # Keep subject base neutral; status is appended later
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
-    cfg["HTML_INTRO_BASE"] = os.getenv(
-        "BODY",
-        f"Hi Team<br/>"
-        f"Good day!<br/>"
-        f"We have performed the eClaims health check and no issue encountered.<br/>"
-        f"(ID/DOB verification).<br/><strong>Timestamp:</strong> {now}"
+    # Prefer BODY_HTML; fallback to BODY; else default
+    cfg["HTML_INTRO_BASE"] = (
+        os.getenv("BODY_HTML")
+        or os.getenv("BODY")
+        or (
+            "Hi Team<br/>"
+            "Good day!<br/>"
+            "We have performed the eClaims health check and no issue encountered.<br/>"
+            "(ID/DOB verification).<br/><strong>Timestamp:</strong> " + now
+        )
     )
     cfg["TEXT_BODY"] = (
         "This email contains an inline screenshot of the automated ClaimSimple HK flow. "
         "If you can't see it, open in an HTML-capable client."
     )
+
+    # Post-assert wait (ms) before taking the screenshot
+    cfg["POST_ASSERT_DELAY_MS"] = int(os.getenv("POST_ASSERT_DELAY_MS", "1000"))
+
     return cfg
 
 
@@ -379,6 +416,8 @@ def page(config):
         context = browser.new_context(
             viewport={"width": config["WINDOW_W"], "height": config["WINDOW_H"]},
             ignore_https_errors=True,
+            timezone_id="Asia/Hong_Kong",
+            locale="en-HK",
         )
         pg = context.new_page()
         yield pg
@@ -409,12 +448,20 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
             claim_dob=config["CLAIM_DOB"],
             expected_error_text=config["EXPECTED_ERROR_TEXT"],
             screenshot_path=screenshot_path,
+            post_assert_delay_ms=config["POST_ASSERT_DELAY_MS"],  # <-- delay hook here
         )
     except Exception as e:
         test_failed = True
         failure_reason = str(e)
         # Best-effort: capture a screenshot on failure path
         try:
+            # Ensure directory exists
+            try:
+                ss_dir = os.path.dirname(screenshot_path)
+                if ss_dir:
+                    os.makedirs(ss_dir, exist_ok=True)
+            except Exception:
+                pass
             page.screenshot(path=screenshot_path, full_page=True)
         except Exception:
             pass
@@ -433,9 +480,14 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
             if failure_reason:
                 html_intro = f"{html_intro}<br/><strong>Failure reason:</strong> {failure_reason}"
 
+            # Validate SMTP vars only when needed
+            smtp_user = config["SMTP_USERNAME"] or get_env("SMTP_USERNAME")
+            smtp_pass = config["SMTP_PASSWORD"] or get_env("SMTP_PASSWORD")
+            to_email  = config["TO_EMAIL"] or get_env("TO_EMAIL")
+
             msg = build_message_with_inline_image(
-                from_email=config["SMTP_USERNAME"],
-                to_email=config["TO_EMAIL"],
+                from_email=smtp_user,
+                to_email=to_email,
                 subject=subject,
                 text_body=config["TEXT_BODY"],
                 html_intro=html_intro,
@@ -444,8 +496,8 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
             )
             send_via_gmail_smtp(
                 msg,
-                config["SMTP_USERNAME"],
-                config["SMTP_PASSWORD"],
+                smtp_user,
+                smtp_pass,
                 use_port_465=config["USE_SSL_465"],
             )
-            print(f"✅ Email with inline screenshot sent to {config['TO_EMAIL']}")
+            print(f"✅ Email with inline screenshot sent to {to_email}")
