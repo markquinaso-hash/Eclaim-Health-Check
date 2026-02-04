@@ -163,6 +163,25 @@ def set_input_value_js(page, css_selector: str, value: str):
     )
 
 
+# --- Helpers -----------------------------------------------------------------
+
+def commit_and_press_enter(locator):
+    """
+    Ensure the element's value is committed (input/change/blur),
+    then press Enter on the element itself.
+    """
+    try:
+        locator.dispatch_event("input")
+        locator.dispatch_event("change")
+        locator.dispatch_event("blur")
+    except Exception:
+        pass
+    try:
+        locator.press("Enter")
+    except Exception:
+        pass
+
+
 def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, claim_dob,
                                     expected_error_text, screenshot_path) -> str:
     """
@@ -210,42 +229,60 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     page.wait_for_selector(ID_INPUT, state="visible", timeout=30000)
     id_box = page.locator(ID_INPUT).first
     id_box.scroll_into_view_if_needed()
-    id_box.click()                              # ensure focus
+    id_box.click()  # ensure focus
     id_box.fill("")
     id_box.fill(claim_id)
 
-    # Commit value for reactive frameworks
-    id_box.dispatch_event("input")
-    id_box.dispatch_event("change")
-    id_box.dispatch_event("blur")
-
-    # Try element-targeted Enter first
-    try:
-        id_box.press("Enter")
-    except Exception:
-        pass
-
-    # Optional: verify progress; if no expected change, fallback to clicking the next control
-    try:
-        # e.g., DOB becomes attached/visible/enabled shortly
-        page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=2000)
-    except PlaywrightTimeout:
-        # Fallback to clicking Next/Continue (adjust selector to your actual control)
-        # page.locator("text=Continue").first.click()
-        pass
+    # Same behavior controlled by env toggle (default: True)
+    if os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes"):
+        commit_and_press_enter(id_box)
+    else:
+        # Commit without pressing Enter
+        try:
+            id_box.dispatch_event("input")
+            id_box.dispatch_event("change")
+            id_box.dispatch_event("blur")
+        except Exception:
+            pass
 
     print("Entered ID.")
     time.sleep(0.8)
 
     # 6) Enter DOB (hidden/masked input → set via JS and fire events)
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
-    set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
-    # Commit + try Enter
-    page.evaluate("sel => document.querySelector(sel)?.dispatchEvent(new Event('blur', {bubbles:true}))", DOB_NAME_SELECTOR)
+
+    dob_box = page.locator(DOB_NAME_SELECTOR).first
     try:
-        page.keyboard.press("Enter")
+        dob_box.scroll_into_view_if_needed()
     except Exception:
         pass
+    # Focus attempts (safe even if masked/hidden)
+    try:
+        dob_box.click(timeout=1000)
+    except Exception:
+        pass
+    try:
+        dob_box.evaluate("el => el.focus()")
+    except Exception:
+        pass
+
+    # Set value via JS to bypass masking + fire input/change
+    set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
+
+    # Mirror Step #5 behavior with an env toggle (default: True)
+    if os.getenv("CLAIM_DOB_PRESS_ENTER", "true").lower() in ("1", "true", "yes"):
+        commit_and_press_enter(dob_box)
+    else:
+        # Commit without pressing Enter
+        try:
+            dob_box.dispatch_event("input")
+            dob_box.dispatch_event("change")
+            dob_box.dispatch_event("blur")
+        except Exception:
+            pass
+
+    print("Entered DOB via JS + Enter attempt.")
+    time.sleep(0.8)
 
     # Wait for potential error message to render
     try:
@@ -289,10 +326,10 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    
     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
     cfg["CLAIM_ID_PRESS_ENTER"] = os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
+    cfg["CLAIM_DOB_PRESS_ENTER"] = os.getenv("CLAIM_DOB_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
 
     # Assertion text
     cfg["EXPECTED_ERROR_TEXT"] = os.getenv(
@@ -318,7 +355,7 @@ def config():
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS")
     cfg["HTML_INTRO_BASE"] = os.getenv(
         "BODY",
-        f"Hi Team,</br>"
+        f"Hi Team</br>"
         f"Good day!</br>"
         f"We have performed the eClaims health check and no issue encountered.</br>"
         f"(ID/DOB verification).<br><strong>Timestamp:</strong> {now}"
