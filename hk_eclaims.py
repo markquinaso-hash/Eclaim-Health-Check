@@ -493,7 +493,7 @@ def config():
     # Email content (per flow)
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
-    f"Hi Team, <br> </br> Good day! </br> </br> We have performed the eClaims health check and no issue encountered."
+    cfg("Hi Team, <br> </br> Good day! </br> </br> We have performed the eClaims health check and no issue encountered.")
     cfg["BODY1"] = os.getenv("BODY1") or (
         "Hi Team,<br/><br/>Good day!<br/><br/>"
         "<strong>OUTPATIENTS CLAIMS:</strong><br/>"
