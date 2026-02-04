@@ -71,9 +71,9 @@ jobs:
           EMAIL_ON_FAILURE: "true"      # also email on failure
           USE_SSL_465: "false"          # set true to use SSL (465); false -> STARTTLS (587)
           SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT)"
-          BODY1: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>OUTPATIENTS CLAIMS:</strong>"
-          BODY2: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>MY MEDICAL CARD:</strong>"
-          BODY3: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>FIND MY DOCTOR:</strong>"
+          BODY1: "<strong>OUTPATIENTS CLAIMS:</strong>"
+          BODY2: "<strong>MY MEDICAL CARD:</strong>"
+          BODY3: "<strong>FIND MY DOCTOR:</strong>"
           SCREENSHOT_PATH: "screenshot.png"
         run: |
           # Run only the intended test file (ensure the filename is correct and exists)
