@@ -11,7 +11,7 @@ Flow:
    - DOB: try native typing by name="dob" + Enter (Selenium-like)
    - Fallback to JS setter + commit + Enter if masked/hidden
 6) Verify the expected error message
-7) Take a screenshot
+7) Ensure the error is visually rendered (painted) and then take a screenshot
 8) Email the screenshot inline (always or only on failure, controlled by env)
 
 Author: MJ
@@ -185,6 +185,77 @@ def commit_and_press_enter(locator):
         pass
 
 
+def wait_for_verify_response_if_any(page, url_hint: str | None, timeout_ms: int = 10000):
+    """
+    If the app calls a verify/validate endpoint, wait for it to complete before
+    we assert/screenshot. Non-fatal if nothing matches.
+    - url_hint: a substring or '|' pipe-separated substrings (case-insensitive).
+    """
+    if not url_hint:
+        url_hint = "verify|validate"
+    tokens = [t.strip().lower() for t in url_hint.split("|") if t.strip()]
+    def _matcher(r):
+        u = r.url.lower()
+        return any(tok in u for tok in tokens) and r.request.method in ("GET", "POST")
+    try:
+        page.wait_for_response(_matcher, timeout=timeout_ms)
+    except Exception:
+        # OK if no network call is triggered for validation
+        pass
+
+
+def wait_until_painted(page, locator, timeout_ms: int = 5000):
+    """
+    Ensure the locator is not only visible but *painted/opaque* and with non-zero box.
+    Then flush two rAFs to let the browser settle.
+    """
+    locator.scroll_into_view_if_needed()
+    handle = locator.element_handle(timeout=timeout_ms)
+    if not handle:
+        return
+    page.wait_for_function(
+        """(el) => {
+            if (!el || !el.isConnected) return false;
+            const s = getComputedStyle(el);
+            const painted = el.offsetParent !== null
+                && el.offsetHeight > 0 && el.offsetWidth > 0
+                && s.visibility !== 'hidden'
+                && s.display !== 'none'
+                && parseFloat(s.opacity || '1') > 0.01;
+            return painted;
+        }""",
+        arg=handle,
+        timeout=timeout_ms
+    )
+    # Flush two animation frames for good measure
+    page.evaluate("""() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))""")
+
+
+def stable_screenshot(page, path, retries: int = 3, delay_ms: int = 400, full_page: bool = True):
+    """
+    Screenshot with small retry loop, to avoid intermittent paint races.
+    """
+    # Ensure directory
+    try:
+        d = os.path.dirname(path)
+        if d:
+            os.makedirs(d, exist_ok=True)
+    except Exception:
+        pass
+
+    for _ in range(retries):
+        try:
+            page.screenshot(path=path, full_page=full_page)
+            return
+        except Exception:
+            pass
+        page.wait_for_timeout(delay_ms)
+    # Final attempt
+    page.screenshot(path=path, full_page=full_page)
+
+
+# --- Main Flow ---------------------------------------------------------------
+
 def run_claimsimple_flow_playwright(
     page, *,
     cs_hk_url,
@@ -193,7 +264,8 @@ def run_claimsimple_flow_playwright(
     claim_dob,
     expected_error_text,
     screenshot_path,
-    post_assert_delay_ms: int = 1000,   # <-- configurable delay before screenshot
+    post_assert_delay_ms: int = 1000,   # configurable delay before screenshot
+    verify_url_hint: str | None = None, # e.g., "verify|validate|login/validate"
 ) -> str:
     """
     Runs the ClaimSimple HK flow and takes a screenshot at the end.
@@ -299,8 +371,8 @@ def run_claimsimple_flow_playwright(
     except PlaywrightTimeout:
         print("No error message element found within timeout.")
 
-    # Assert if EXPECTED_TEXT provided (use contains matching for resilience)
-    # add delay once the expected text appears before taking screenshot
+    # ---- Robust visual-stability block --------------------------------------
+    # 1) Assert textual match for resilience
     if expected_error_text:
         expected_norm = expected_error_text.strip().casefold()
         actual_norm = observed_error_text.strip().casefold()
@@ -310,29 +382,45 @@ def run_claimsimple_flow_playwright(
             f"Actual:                     {observed_error_text}"
         )
 
-        # Ensure the DOM actually shows the expected text content before the delay/screenshot
+        # 2) Force validation to commit: blur both inputs + Enter
         try:
-            page.locator(ERROR_TEXT_CSS).filter(has_text=expected_error_text).wait_for(
-                state="visible", timeout=3000
-            )
+            id_box.dispatch_event("input")
+            id_box.dispatch_event("change")
+            id_box.dispatch_event("blur")
+            dob_box.dispatch_event("input")
+            dob_box.dispatch_event("change")
+            dob_box.dispatch_event("blur")
         except Exception:
-            # Non-fatal: we already asserted via text capture above
+            pass
+        try:
+            page.evaluate("document.activeElement && document.activeElement.blur && document.activeElement.blur();")
+        except Exception:
+            pass
+        try:
+            page.keyboard.press("Enter")
+        except Exception:
             pass
 
-        # Extra stabilization delay so the UI finishes rendering (animations, layout, etc.)
+        # 3) If the app calls a verify/validate API, wait for it (non-fatal)
+        wait_for_verify_response_if_any(page, verify_url_hint, timeout_ms=10000)
+
+        # 4) Ensure the error element with the expected text is actually painted and opaque
+        try:
+            # Prefer the exact element containing the expected text if possible
+            err_loc = page.locator(ERROR_TEXT_CSS).filter(has_text=expected_error_text).first
+            if not err_loc.count():
+                err_loc = page.locator(ERROR_TEXT_CSS).first
+            wait_until_painted(page, err_loc, timeout_ms=5000)
+        except Exception:
+            # Non-fatal: proceed
+            pass
+
+        # 5) Extra stabilization delay (env-configurable)
         if post_assert_delay_ms and post_assert_delay_ms > 0:
-            time.sleep(post_assert_delay_ms / 3000.0)
+            time.sleep(post_assert_delay_ms / 1000.0)
 
-    # Ensure screenshot directory exists
-    try:
-        ss_dir = os.path.dirname(screenshot_path)
-        if ss_dir:
-            os.makedirs(ss_dir, exist_ok=True)
-    except Exception:
-        pass
-
-    # Save screenshot
-    page.screenshot(path=screenshot_path, full_page=True)
+    # ---- Screenshot ----------------------------------------------------------
+    stable_screenshot(page, screenshot_path, retries=3, delay_ms=400, full_page=True)
     print(f"Screenshot saved to {screenshot_path}")
 
     return observed_error_text
@@ -370,7 +458,7 @@ def config():
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     cfg["SCREENSHOT_PATH"] = os.getenv("SCREENSHOT_PATH", os.path.join("screenshots", f"screenshot_{ts}.png"))
 
-    # Email controls (required at send-time)
+    # Email controls (lazy-validated right before send)
     cfg["SMTP_USERNAME"] = os.getenv("SMTP_USERNAME")
     cfg["SMTP_PASSWORD"] = os.getenv("SMTP_PASSWORD")
     cfg["TO_EMAIL"] = os.getenv("TO_EMAIL")
@@ -382,9 +470,8 @@ def config():
 
     # Email content
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Keep subject base neutral; status is appended later
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
-    # Prefer BODY_HTML; fallback to BODY; else default
+    # Prefer BODY_HTML; fallback to BODY; else default HTML
     cfg["HTML_INTRO_BASE"] = (
         os.getenv("BODY_HTML")
         or os.getenv("BODY")
@@ -401,7 +488,10 @@ def config():
     )
 
     # Post-assert wait (ms) before taking the screenshot
-    cfg["POST_ASSERT_DELAY_MS"] = int(os.getenv("POST_ASSERT_DELAY_MS", "3000"))
+    cfg["POST_ASSERT_DELAY_MS"] = int(os.getenv("POST_ASSERT_DELAY_MS", "1000"))
+
+    # Optional: Hint for verify API URL matching (e.g., "verify|validate|emc/verify")
+    cfg["VERIFY_URL_HINT"] = os.getenv("VERIFY_URL_HINT", "verify|validate")
 
     return cfg
 
@@ -419,6 +509,12 @@ def page(config):
             timezone_id="Asia/Hong_Kong",
             locale="en-HK",
         )
+        # Optional: set a default timeout globally (tunable via env if desired)
+        try:
+            context.set_default_timeout(int(os.getenv("PW_TIMEOUT_MS", "30000")))
+        except Exception:
+            pass
+
         pg = context.new_page()
         yield pg
         try:
@@ -432,7 +528,8 @@ def page(config):
 def test_claimsimple_id_dob_flow_screenshot_email(page, config):
     """
     Executes the ClaimSimple flow, asserts the expected error text,
-    saves a screenshot, and emails the result inline.
+    ensures the error is visually rendered, saves a screenshot,
+    and emails the result inline.
     """
     screenshot_path = config["SCREENSHOT_PATH"]
     observed_error = ""
@@ -448,21 +545,15 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
             claim_dob=config["CLAIM_DOB"],
             expected_error_text=config["EXPECTED_ERROR_TEXT"],
             screenshot_path=screenshot_path,
-            post_assert_delay_ms=config["POST_ASSERT_DELAY_MS"],  # <-- delay hook here
+            post_assert_delay_ms=config["POST_ASSERT_DELAY_MS"],
+            verify_url_hint=config["VERIFY_URL_HINT"],
         )
     except Exception as e:
         test_failed = True
         failure_reason = str(e)
         # Best-effort: capture a screenshot on failure path
         try:
-            # Ensure directory exists
-            try:
-                ss_dir = os.path.dirname(screenshot_path)
-                if ss_dir:
-                    os.makedirs(ss_dir, exist_ok=True)
-            except Exception:
-                pass
-            page.screenshot(path=screenshot_path, full_page=True)
+            stable_screenshot(page, screenshot_path, retries=2, delay_ms=300, full_page=True)
         except Exception:
             pass
         raise
