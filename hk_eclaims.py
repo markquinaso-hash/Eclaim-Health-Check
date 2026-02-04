@@ -86,6 +86,7 @@ def build_message_with_multiple_images(
     to_email: str,
     subject: str,
     text_body: str,
+    intro_html: str,
     sections: list,
 ):
     """
@@ -107,8 +108,14 @@ def build_message_with_multiple_images(
     # Plain-text fallback
     msg.set_content(text_body)
 
-    # Build HTML with one <section> per flow, each containing an <img src="cid:...">
-    html_parts = []
+    # Build HTML with a global intro and one <section> per flow, each containing an <img src="cid:...">
+    intro_html = html.unescape(intro_html or "")
+    html_parts = [f"""
+      <div style="font-family:Segoe UI,Arial,sans-serif; font-size:14px; line-height:1.5; color:#222; margin:0 0 12px;">
+        {intro_html}
+      </div>
+    """]
+
     cid_pairs = []  # list[(cid, section_dict)]
     for idx, s in enumerate(sections, start=1):
         cid = make_msgid(domain="inline")          # e.g. "<random@inline>"
@@ -121,7 +128,6 @@ def build_message_with_multiple_images(
         observed_error = html.escape(s.get("observed_error") or "")
         failure_reason = html.escape(s.get("failure_reason") or "")
 
-        # IMPORTANT: use an IMG tag referencing the CID
         block = f"""
         <section style="margin:14px 0; padding-bottom:12px; border-bottom:1px solid #e8e8e8;">
           <h3 style="font-family:Segoe UI,Arial,sans-serif; margin:0 0 8px;">
@@ -160,7 +166,7 @@ def build_message_with_multiple_images(
                     f.read(),
                     maintype="image",
                     subtype=subtype,
-                    cid=cid,
+                    cid=cid,  # sets Content-ID
                     filename=os.path.basename(img_path),
                 )
                 # Encourage inline rendering (helps Outlook)
@@ -490,25 +496,30 @@ def config():
     cfg["ALWAYS_EMAIL"] = os.getenv("ALWAYS_EMAIL", "true").lower() in ("1", "true", "yes")
     cfg["EMAIL_ON_FAILURE"] = os.getenv("EMAIL_ON_FAILURE", "true").lower() in ("1", "true", "yes")
 
-    # Email content (per flow)
+    # Email content
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
-    cfg("Hi Team, <br> </br> Good day! </br> </br> We have performed the eClaims health check and no issue encountered.")
-    cfg["BODY1"] = os.getenv("BODY1") or (
+
+    # Global intro (your requested text)
+    cfg["INTRO_HTML"] = os.getenv("INTRO_HTML") or (
         "Hi Team,<br/><br/>Good day!<br/><br/>"
+        "We have performed the eClaims health check and no issue encountered."
+    )
+
+    # Per-flow intros (keep your existing bodies; allow YAML to override)
+    cfg["BODY1"] = os.getenv("BODY1") or (
         "<strong>OUTPATIENTS CLAIMS:</strong><br/>"
         f"<em>Timestamp: {now_str}</em>"
     )
     cfg["BODY2"] = os.getenv("BODY2") or (
-        "Hi Team,<br/><br/>Good day!<br/><br/>"
         "<strong>MY MEDICAL CARD:</strong><br/>"
         f"<em>Timestamp: {now_str}</em>"
     )
     cfg["BODY3"] = os.getenv("BODY3") or (
-        "Hi Team,<br/><br/>Good day!<br/><br/>"
         "<strong>FIND MY DOCTOR:</strong><br/>"
         f"<em>Timestamp: {now_str}</em>"
     )
+
     cfg["TEXT_BODY"] = (
         "This email contains inline screenshots of the automated HK eClaims flows. "
         "If you can't see them, open in an HTML-capable client."
@@ -640,6 +651,7 @@ def test_all_flows_single_email(page, config):
             to_email=to_email,
             subject=subject,
             text_body=config["TEXT_BODY"],
+            intro_html=config["INTRO_HTML"],
             sections=results,
         )
         send_via_gmail_smtp(
