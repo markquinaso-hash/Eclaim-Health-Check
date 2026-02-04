@@ -69,7 +69,7 @@ jobs:
           ALWAYS_EMAIL: "true"          # always send an email (in addition to failure)
           EMAIL_ON_FAILURE: "true"      # also email on failure
           USE_SSL_465: "false"          # set true to use SSL (465); false -> STARTTLS (587)
-          SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS"
+          SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT)"
           BODY: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br>"
           SCREENSHOT_PATH: "screenshot.png"
         run: |
