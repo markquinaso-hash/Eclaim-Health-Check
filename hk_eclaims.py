@@ -3,21 +3,21 @@
 HK eClaims - Multi-flow (3 flows) in ONE file + ONE email with multiple inline screenshots.
 
 Flows (in this order):
-  1) Outpatients Claims (DoctorSearch)  -> selectors: .splash__body_search-doctor / doctorsearch-continue
-  2) My Medical Card (eMedicalCard)     -> selectors: .splash__body_get-emedicard / emedicalcard-continue
-  3) Find My Doctor (Make Claim route)  -> selectors: .splash__body_make-claim / doctorsearch-continue
+  1) Outpatients Claims (DoctorSearch)
+  2) My Medical Card (eMedicalCard)
+  3) Find My Doctor (Make Claim route)
 
 Each flow:
   - Navigates to splash
-  - Goes to the T&C route
+  - Goes to the T&C route (click; fallback to provided TNC URL)
   - Accepts checkbox & Continue
   - Switches to ID, enters ID + DOB
   - Verifies error text appears
   - Takes a screenshot
 
 Finally:
-  - Sends ONE email, with three inline images + per-flow status and messages
-  - Marks the pytest test failed if ANY flow failed (after sending email).
+  - Sends ONE email with three inline images + per-flow status
+  - Fails pytest if ANY flow failed (after sending the email)
 """
 
 import os
@@ -92,7 +92,7 @@ def build_message_with_multiple_images(
     Creates an email with a single HTML body and multiple inline images.
     sections: list of dicts with keys:
         - title (str)
-        - html_intro (str)  # already safe HTML
+        - html_intro (str)  # may contain HTML entities (we unescape)
         - image_path (str)
         - image_subtype (str) default 'png'
         - observed_error (str|None)
@@ -107,34 +107,34 @@ def build_message_with_multiple_images(
     # Plain-text fallback
     msg.set_content(text_body)
 
-    # Build HTML with one <section> per flow
+    # Build HTML with one <section> per flow, each containing an <img src="cid:...">
     html_parts = []
-    image_cids = []
+    cid_pairs = []  # list[(cid, section_dict)]
     for idx, s in enumerate(sections, start=1):
-        # Generate CID per image
-        cid = make_msgid(domain="inline")
-        cid_no_brackets = cid[1:-1]
-        image_cids.append((cid, s))
+        cid = make_msgid(domain="inline")          # e.g. "<random@inline>"
+        cid_no_brackets = cid[1:-1]                # strip < >
+        cid_pairs.append((cid, s))
 
         title = html.escape(s.get("title", f"Flow {idx}"))
-        intro = s.get("html_intro", "")
-        # Allow user to pass HTML as entities; unescape them to real tags
-        intro = html.unescape(intro or "")
-
+        intro = html.unescape(s.get("html_intro") or "")  # turn &lt;br/&gt; into <br/>
         status = html.escape(s.get("status", "UNKNOWN"))
         observed_error = html.escape(s.get("observed_error") or "")
         failure_reason = html.escape(s.get("failure_reason") or "")
 
+        # IMPORTANT: use an IMG tag referencing the CID
         block = f"""
         <section style="margin:14px 0; padding-bottom:12px; border-bottom:1px solid #e8e8e8;">
-          <h3 style="font-family:Segoe UI,Arial,sans-serif; margin:0 0 8px;">{title} — <span style="color:{'#1a7f37' if status=='PASSED' else '#d92d20'}">{status}</span></h3>
+          <h3 style="font-family:Segoe UI,Arial,sans-serif; margin:0 0 8px;">
+            {title} — <span style="color:{'#1a7f37' if status=='PASSED' else '#d92d20'}">{status}</span>
+          </h3>
           <div style="font-family:Segoe UI,Arial,sans-serif; font-size:14px; line-height:1.5; color:#222;">
             {intro}
             {"<p><strong>Observed error:</strong> " + observed_error + "</p>" if observed_error else ""}
             {"<p><strong>Failure reason:</strong> " + failure_reason + "</p>" if failure_reason else ""}
           </div>
-          <div>
-            cid:{cid_no_brackets}
+          <div style="margin-top:8px;">
+            <img src="cid:{cid_no_brackets}" alt="Screenshot - {title}"
+                 style="max-width:100%; height:auto; border:1px solid #ddd; border-radius:4px;" />
           </div>
         </section>
         """
@@ -147,23 +147,27 @@ def build_message_with_multiple_images(
       </body>
     </html>
     """
-
     msg.add_alternative(full_html, subtype="html")
-    html_part = msg.get_body(preferencelist=("html",))
 
-    # Attach each image as related content
-    for cid, s in image_cids:
+    # Attach each image as "related" to the HTML body and mark as inline
+    html_part = msg.get_body(preferencelist=("html",))
+    for cid, s in cid_pairs:
         img_path = s.get("image_path")
         subtype = s.get("image_subtype", "png")
         if img_path and os.path.exists(img_path):
             with open(img_path, "rb") as f:
-                html_part.add_related(
+                related = html_part.add_related(
                     f.read(),
                     maintype="image",
                     subtype=subtype,
                     cid=cid,
                     filename=os.path.basename(img_path),
                 )
+                # Encourage inline rendering (helps Outlook)
+                try:
+                    related.add_header("Content-Disposition", f'inline; filename="{os.path.basename(img_path)}"')
+                except Exception:
+                    pass
     return msg
 
 
@@ -454,11 +458,11 @@ def config():
 
     # URLs per flow (override via env)
     cfg["CS_HK_URL1"] = os.getenv("CS_HK_URL1", "https://www.claimsimple.hk/#/")
-    cfg["TNC_EMC_URL1"] = os.getenv("TNC_EMC_URL1", "https://www.claimsimple.hk/DoctorSearch#/")
+    cfg["TNC_EMC_URL1"] = os.getenv("TNC_EMC_URL1", "https://www.claimsimple.hk/#/tnc")
     cfg["CS_HK_URL2"] = os.getenv("CS_HK_URL2", "https://www.claimsimple.hk/#/")
     cfg["TNC_EMC_URL2"] = os.getenv("TNC_EMC_URL2", "https://www.claimsimple.hk/eMedicalCard#")
     cfg["CS_HK_URL3"] = os.getenv("CS_HK_URL3", "https://www.claimsimple.hk/#/")
-    cfg["TNC_EMC_URL3"] = os.getenv("TNC_EMC_URL3", "https://www.claimsimple.hk/#/tnc")
+    cfg["TNC_EMC_URL3"] = os.getenv("TNC_EMC_URL3", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs (shared)
     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
@@ -470,15 +474,12 @@ def config():
         "The information you provided does not match our records. Please try again."
     )
 
-    # Screenshots - build 3 paths from a base
-    # If SCREENSHOT_PATH given (e.g., 'screenshot.png'), derive 'screenshot_1.png', etc., in same folder.
+    # Screenshot paths: prefer explicit per-flow env; else derive a timestamped set
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    given_path = os.getenv("SCREENSHOT_PATH", os.path.join("screenshots", f"screenshot_{ts}.png"))
-    base_dir = os.path.dirname(given_path) or "."
-    base_name = os.path.splitext(os.path.basename(given_path))[0]  # e.g., 'screenshot'
-    cfg["SHOT1"] = os.path.join(base_dir, f"{base_name}_1.png")
-    cfg["SHOT2"] = os.path.join(base_dir, f"{base_name}_2.png")
-    cfg["SHOT3"] = os.path.join(base_dir, f"{base_name}_3.png")
+    default_base = os.path.join("screenshots", f"screenshot_{ts}")
+    cfg["SHOT1"] = os.getenv("SCREENSHOT_PATH1", f"{default_base}_1.png")
+    cfg["SHOT2"] = os.getenv("SCREENSHOT_PATH2", f"{default_base}_2.png")
+    cfg["SHOT3"] = os.getenv("SCREENSHOT_PATH3", f"{default_base}_3.png")
 
     # Email controls
     cfg["SMTP_USERNAME"] = os.getenv("SMTP_USERNAME")
@@ -557,8 +558,8 @@ def test_all_flows_single_email(page, config):
             "tnc_url": config["TNC_EMC_URL1"],
             "claim_btn_selector": ".splash__body_search-doctor",
             "continue_btn_selector": ".button-primary.button-primary--full.button-doctorsearch-continue",
-            "screenshot": config["SHOT3"],
-            "html_intro": config["BODY3"],
+            "screenshot": config["SHOT1"],
+            "html_intro": config["BODY1"],
         },
         {
             "title": "My Medical Card",
@@ -575,8 +576,8 @@ def test_all_flows_single_email(page, config):
             "tnc_url": config["TNC_EMC_URL3"],
             "claim_btn_selector": ".splash__body_make-claim",
             "continue_btn_selector": ".button-primary.button-primary--full.button-doctorsearch-continue",
-            "screenshot": config["SHOT1"],
-            "html_intro": config["BODY1"],
+            "screenshot": config["SHOT3"],
+            "html_intro": config["BODY3"],
         },
     ]
 
@@ -625,12 +626,7 @@ def test_all_flows_single_email(page, config):
     # ---------------- Send one email (ALWAYS or only on failure) --------------
     should_email = config["ALWAYS_EMAIL"] or (any_fail and config["EMAIL_ON_FAILURE"])
     if should_email:
-        # Subject status
-        if any_fail:
-            subject_status = "FAILED"
-        else:
-            subject_status = "PASSED"
-
+        subject_status = "FAILED" if any_fail else "PASSED"
         subject = f"{config['SUBJECT_BASE']} [{subject_status}]"
 
         # Validate SMTP vars only when needed
