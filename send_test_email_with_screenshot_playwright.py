@@ -365,13 +365,13 @@ def test_claimsimple_id_dob_flow_screenshot_email(page, config):
 
         if should_email and os.path.exists(screenshot_path):
             status = "FAILED" if test_failed else "PASSED"
-            subject = f"[{status}] {config['SUBJECT_BASE']}"
+            subject = f"{config['SUBJECT_BASE']}"
 
             html_intro = config["HTML_INTRO_BASE"]
             if observed_error:
-                html_intro = f"{html_intro}<br><strong>Observed error:</strong> {observed_error}"
+                html_intro = f"[{status}] {html_intro}<br><strong>Observed error:</strong> {observed_error}"
             if failure_reason:
-                html_intro = f"{html_intro}<br><strong>Failure reason:</strong> {failure_reason}"
+                html_intro = f"[{status}] {html_intro}<br><strong>Failure reason:</strong> {failure_reason}"
 
             msg = build_message_with_inline_image(
                 from_email=config["SMTP_USERNAME"],
