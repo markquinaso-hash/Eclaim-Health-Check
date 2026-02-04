@@ -1,0 +1,76 @@
+name: GOCC - Health Check - HK eClaims - Outpatient Claims
+on:
+  push:
+    branches: [ main ]
+    # Optional: only run when these files change
+    # paths:
+    #   - ".github/workflows/email-inline-screenshot.yml"
+    #   - "send_test_email_with_screenshot_playwright.py"
+    #   - "requirements.txt"
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}   # allow manual runs from Actions tab
+  # Optional: run on a schedule (UTC). Example: every day at 01:30 UTC
+  # schedule:
+  #   - cron: "30 1 * * *"
+
+jobs:
+  send-email:
+    runs-on: ubuntu-latest
+
+    # Optional: restrict token permissions (good practice)
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+
+      - name: Install Playwright browsers (Chromium) + OS deps
+        run: |
+          python -m playwright install --with-deps chromium
+
+      # If your test relies on any repo-level .env.example -> .env, do it here
+      # - name: Prepare .env
+      #   run: cp .env.example .env
+
+      - name: Run pytest (Playwright) and send email
+        env:
+          # Gmail SMTP (use App Password!)
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          TO_EMAIL:      ${{ secrets.TO_EMAIL }}
+
+          # Browser behavior
+          HEADLESS: "true"
+          WINDOW_W: "1920"
+          WINDOW_H: "1080"
+
+          # App inputs
+          CS_HK_URL: "https://www.claimsimple.hk/#/"
+          TNC_EMC_URL: "https://www.claimsimple.hk/#/tnc"
+          CLAIM_ID: "A0000000"
+          CLAIM_DOB: "01/01/1990"
+          EXPECTED_ERROR_TEXT: "The information you provided does not match our records. Please try again."
+
+          # Email behavior + content
+          ALWAYS_EMAIL: "true"          # always send an email (in addition to failure)
+          EMAIL_ON_FAILURE: "true"      # also email on failure
+          USE_SSL_465: "false"          # set true to use SSL (465); false -> STARTTLS (587)
+          SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT)"
+          BODY: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>OUTPATIENTS CLAIMS:</strong>"
+          SCREENSHOT_PATH: "screenshot.png"
+        run: |
+          # Run only the intended test file (ensure the filename is correct and exists)
+          pytest -q -s outpatient_claims.py
