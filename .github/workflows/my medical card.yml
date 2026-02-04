@@ -1,4 +1,4 @@
-name: GOCC - Health Check - HK eClaims - Outpatient Claims
+name: GOCC - Health Check - HK eClaims - My Medical Card
 on:
   push:
     branches: [ main ]
