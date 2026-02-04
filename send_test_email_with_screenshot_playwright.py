@@ -137,7 +137,7 @@ CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continu
 ID_TOGGLE_ICON = ".ui-selection__symbol"
 ID_INPUT = ".qna__input"                 # First .qna__input = ID field in your flow
 DOB_NAME_SELECTOR = "input[name='dob']"  # name-based selector as requested
-ERROR_TEXT_CSS = ".qna__input-error"
+ERROR_TEXT_CSS = ".error-tip-text"
 
 
 def set_input_value_js(page, css_selector: str, value: str):
@@ -286,7 +286,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
             )
             print("Entered DOB via JS setter; dispatched Enter at document level.")
 
-    time.sleep(0.8)
+    time.sleep(5)
 
     # Wait for potential error message to render
     try:
