@@ -73,4 +73,4 @@ jobs:
           SCREENSHOT_PATH: "screenshot.png"
         run: |
           # Run only the intended test file (ensure the filename is correct and exists)
-          pytest -q -s outpatient_claims.py
+          pytest -q -s my_medical_card.py
