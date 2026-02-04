@@ -256,6 +256,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
         dob_box.click(timeout=1000)
         dob_box.fill("")  # clear if any
         dob_box.type(claim_dob, delay=20)  # slight delay to mimic real typing
+        time.sleep(3)
         commit_and_press_enter(dob_box)
         print("Entered DOB via native typing + Enter on name='dob'.")
     except Exception as e:
@@ -330,8 +331,8 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
-    cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
+    cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000/n")
+    cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990/n")
 
     # Assertion text
     cfg["EXPECTED_ERROR_TEXT"] = os.getenv(
