@@ -552,7 +552,7 @@ def test_all_flows_single_email(page, config):
     """
     flows = [
         {
-            "title": "Find My Doctor",
+            "title": "Outpatients Claims",
             "cs_hk_url": config["CS_HK_URL1"],
             "tnc_url": config["TNC_EMC_URL1"],
             "claim_btn_selector": ".splash__body_search-doctor",
@@ -570,7 +570,7 @@ def test_all_flows_single_email(page, config):
             "html_intro": config["BODY2"],
         },
         {
-            "title": "Outpatients Claims",
+            "title": "Find My Doctor",
             "cs_hk_url": config["CS_HK_URL3"],
             "tnc_url": config["TNC_EMC_URL3"],
             "claim_btn_selector": ".splash__body_make-claim",
