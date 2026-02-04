@@ -7,7 +7,9 @@ Flow:
 2) Click Claim → navigate to EMC
 3) Accept T&Cs (checkbox) → Continue
 4) Switch to ID option
-5) Enter ID + DOB (DOB is set via JS to handle hidden/masked input)
+5) Enter ID + DOB
+   - DOB: try native typing by name="dob" + Enter (Selenium-like)
+   - Fallback to JS setter + commit + Enter if masked/hidden
 6) Verify the expected error message
 7) Take a screenshot
 8) Email the screenshot inline (always or only on failure, controlled by env)
@@ -133,9 +135,8 @@ CLAIM_BTN = ".splash__body_search-doctor"
 CHECKBOX_INPUT = 'input.ui-checkbox__input[name="terms"]'
 CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continue"
 ID_TOGGLE_ICON = ".ui-selection__symbol"
-ID_INPUT = ".qna__input"
-DOB_INPUT = ".qna__input.aDOB"           # keep for visibility checks if needed
-DOB_NAME_SELECTOR = "input[name='dob']"  # used for JS value set
+ID_INPUT = ".qna__input"                 # First .qna__input = ID field in your flow
+DOB_NAME_SELECTOR = "input[name='dob']"  # name-based selector as requested
 ERROR_TEXT_CSS = ".qna__input-error"
 
 
@@ -233,55 +234,58 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     id_box.fill("")
     id_box.fill(claim_id)
 
-    # Same behavior controlled by env toggle (default: True)
-    if os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes"):
-        commit_and_press_enter(id_box)
-    else:
-        # Commit without pressing Enter
-        try:
-            id_box.dispatch_event("input")
-            id_box.dispatch_event("change")
-            id_box.dispatch_event("blur")
-        except Exception:
-            pass
+    # Commit + Enter (same pattern we’ll use for DOB fallback too)
+    commit_and_press_enter(id_box)
 
     print("Entered ID.")
     time.sleep(0.8)
 
-    # 6) Enter DOB (hidden/masked input → set via JS and fire events)
+    # 6) Enter DOB by NAME (Selenium-like) with robust fallback
+    # First attempt: behave like Selenium — focus, type, press Enter
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
-
     dob_box = page.locator(DOB_NAME_SELECTOR).first
-    try:
-        dob_box.scroll_into_view_if_needed()
-    except Exception:
-        pass
-    # Focus attempts (safe even if masked/hidden)
-    try:
-        dob_box.click(timeout=1000)
-    except Exception:
-        pass
-    try:
-        dob_box.evaluate("el => el.focus()")
-    except Exception:
-        pass
 
-    # Set value via JS to bypass masking + fire input/change
-    set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
-
-    # Mirror Step #5 behavior with an env toggle (default: True)
-    if os.getenv("CLAIM_DOB_PRESS_ENTER", "true").lower() in ("1", "true", "yes"):
-        commit_and_press_enter(dob_box)
-    else:
-        # Commit without pressing Enter
+    # Try native typing
+    native_dob_ok = True
+    try:
+        # If it is interactable, click & type like Selenium
         try:
-            dob_box.dispatch_event("input")
-            dob_box.dispatch_event("change")
-            dob_box.dispatch_event("blur")
+            dob_box.scroll_into_view_if_needed()
         except Exception:
             pass
+        dob_box.click(timeout=1000)
+        dob_box.fill("")  # clear if any
+        dob_box.type(claim_dob, delay=20)  # slight delay to mimic real typing
+        commit_and_press_enter(dob_box)
+        print("Entered DOB via native typing + Enter on name='dob'.")
+    except Exception as e:
+        native_dob_ok = False
+        print(f"Native DOB typing failed (possibly masked/hidden). Fallback to JS. Reason: {e}")
 
-    print("Entered DOB via JS + Enter attempt.")
+    # Fallback if the element is masked or blocks typing:
+    if not native_dob_ok:
+        set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
+        # Re-commit + Enter on the same element after JS set
+        try:
+            # Ensure focus even if hidden; some frameworks bind key handlers above
+            try:
+                dob_box.evaluate("el => el.focus()")
+            except Exception:
+                pass
+            commit_and_press_enter(dob_box)
+            print("Entered DOB via JS setter + Enter on name='dob'.")
+        except Exception:
+            # Absolute last resort: dispatch Enter at document level
+            page.evaluate(
+                """() => {
+                    const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
+                    document.dispatchEvent(new KeyboardEvent('keydown', opts));
+                    document.dispatchEvent(new KeyboardEvent('keypress', opts));
+                    document.dispatchEvent(new KeyboardEvent('keyup', opts));
+                }"""
+            )
+            print("Entered DOB via JS setter; dispatched Enter at document level.")
+
     time.sleep(0.8)
 
     # Wait for potential error message to render
@@ -327,9 +331,7 @@ def config():
 
     # Inputs
     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
-    cfg["CLAIM_ID_PRESS_ENTER"] = os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
-    cfg["CLAIM_DOB_PRESS_ENTER"] = os.getenv("CLAIM_DOB_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
 
     # Assertion text
     cfg["EXPECTED_ERROR_TEXT"] = os.getenv(
