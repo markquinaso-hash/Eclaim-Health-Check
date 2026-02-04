@@ -134,8 +134,7 @@ def build_message_with_multiple_images(
             {"<p><strong>Failure reason:</strong> " + failure_reason + "</p>" if failure_reason else ""}
           </div>
           <div>
-            <img src="cid:{cid_no_brackets}" alt="{title} screenshot"
-                 style="max-width:100%; height:auto; border:1px solid #ddd;"/>
+            cid:{cid_no_brackets}
           </div>
         </section>
         """
@@ -553,7 +552,7 @@ def test_all_flows_single_email(page, config):
     """
     flows = [
         {
-            "title": "Outpatients Claims",
+            "title": "Find My Doctor",
             "cs_hk_url": config["CS_HK_URL1"],
             "tnc_url": config["TNC_EMC_URL1"],
             "claim_btn_selector": ".splash__body_search-doctor",
@@ -571,7 +570,7 @@ def test_all_flows_single_email(page, config):
             "html_intro": config["BODY2"],
         },
         {
-            "title": "Find My Doctor",
+            "title": "Outpatients Claims",
             "cs_hk_url": config["CS_HK_URL3"],
             "tnc_url": config["TNC_EMC_URL3"],
             "claim_btn_selector": ".splash__body_make-claim",
