@@ -1,15 +1,14 @@
-name: GOCC - Health Check - HK eClaims - Find My Doctor
-
+name: GOCC - Health Check - HK eClaims - Outpatient Claims
 on:
- # push:
-#    branches: [ main ]
+  push:
+    branches: [ main ]
     # Optional: only run when these files change
     # paths:
     #   - ".github/workflows/email-inline-screenshot.yml"
     #   - "send_test_email_with_screenshot_playwright.py"
     #   - "requirements.txt"
- # pull_request:
- #   branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch: {}   # allow manual runs from Actions tab
   # Optional: run on a schedule (UTC). Example: every day at 01:30 UTC
   # schedule:
@@ -60,7 +59,7 @@ jobs:
 
           # App inputs
           CS_HK_URL: "https://www.claimsimple.hk/#/"
-          TNC_EMC_URL: "https://www.claimsimple.hk/DoctorSearch#/"
+          TNC_EMC_URL: "https://www.claimsimple.hk/eMedicalCard#/"
           CLAIM_ID: "A0000000"
           CLAIM_DOB: "01/01/1990"
           EXPECTED_ERROR_TEXT: "The information you provided does not match our records. Please try again."
@@ -70,8 +69,8 @@ jobs:
           EMAIL_ON_FAILURE: "true"      # also email on failure
           USE_SSL_465: "false"          # set true to use SSL (465); false -> STARTTLS (587)
           SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT)"
-          BODY: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>FIND MY DOCTOR:</strong>"
+          BODY: "Hi Team, </br></br> Good day! </br></br> We have performed the eClaims health check and no issue encountered.</br></br> <strong>OUTPATIENTS CLAIMS:</strong>"
           SCREENSHOT_PATH: "screenshot.png"
         run: |
           # Run only the intended test file (ensure the filename is correct and exists)
-          pytest -q -s find_my_doctor.py
+          pytest -q -s outpatient_claims.py

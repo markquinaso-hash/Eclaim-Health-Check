@@ -1,14 +1,14 @@
 name: GOCC - Health Check - HK eClaims - Outpatient Claims
 on:
-  push:
-    branches: [ main ]
+  #push:
+  #  branches: [ main ]
     # Optional: only run when these files change
     # paths:
     #   - ".github/workflows/email-inline-screenshot.yml"
     #   - "send_test_email_with_screenshot_playwright.py"
     #   - "requirements.txt"
-  pull_request:
-    branches: [ main ]
+  # pull_request:
+  #  branches: [ main ]
   workflow_dispatch: {}   # allow manual runs from Actions tab
   # Optional: run on a schedule (UTC). Example: every day at 01:30 UTC
   # schedule:
