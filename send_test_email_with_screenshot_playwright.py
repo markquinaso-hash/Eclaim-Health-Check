@@ -301,6 +301,8 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
             f"Actual:                     {observed_error_text}"
         )
 
+    time.sleep(3)
+     
     # Save screenshot
     page.screenshot(path=screenshot_path, full_page=True)
     print(f"Screenshot saved to {screenshot_path}")
