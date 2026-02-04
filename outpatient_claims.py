@@ -133,9 +133,9 @@ def send_via_gmail_smtp(msg: EmailMessage, username: str, password: str, use_por
 
 # --- Playwright Selectors -----------------------------------------------------
 
-CLAIM_BTN = ".splash__body_search-doctor"
+CLAIM_BTN = ".splash__body_make-claim"
 CHECKBOX_INPUT = 'input.ui-checkbox__input[name="terms"]'
-CONTINUE_BTN = ".splash__body_make-claim.button-style.button-style-right.claim-selection"
+CONTINUE_BTN = ".button-primary.button-primary--full.button-doctorsearch-continue"
 ID_TOGGLE_ICON = ".ui-selection__symbol"
 ID_INPUT = ".qna__input"                 # First .qna__input = ID field in your flow
 DOB_NAME_SELECTOR = "input[name='dob']"  # name-based selector as requested
