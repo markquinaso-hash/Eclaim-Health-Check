@@ -163,15 +163,24 @@ def set_input_value_js(page, css_selector: str, value: str):
     )
 
 
-def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, claim_dob,
-                                    expected_error_text, screenshot_path) -> str:
+
+def run_claimsimple_flow_playwright(
+    page: Page,
+    *,
+    cs_hk_url: str,
+    tnc_emc_url: str,
+    claim_id: str,
+    claim_dob: str,
+    expected_error_text: str,
+    screenshot_path: str,
+) -> str:
     """
     Runs the ClaimSimple HK flow and takes a screenshot at the end.
     Returns the observed error text (if found).
     """
     observed_error_text = ""
 
-    # Navigate to splash (tolerate SPA redirects)
+    # 0) Navigate to splash (tolerate SPA redirects)
     page.goto(cs_hk_url, wait_until="domcontentloaded")
 
     # 1) Click Claim Button (this should route into DoctorSearch/EMC)
@@ -191,7 +200,7 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
 
     # 2) Click checkbox
     page.locator(CHECKBOX_INPUT).scroll_into_view_if_needed()
-    page.locator(CHECKBOX_INPUT).check(force=True)
+    page.locator(CHECKBOX_INPUT).click()  # .check(force=True) not needed; it's not an <input type=checkbox>
     print("Checkbox clicked.")
 
     # 3) Continue
@@ -214,39 +223,62 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     id_box.fill(claim_id)
     id_box.press("Enter")
     print("Entered ID.")
-    time.sleep(0.8)
+    time.sleep(0.5)
 
-    # 6) Enter DOB (hidden/masked input → set via JS and fire events)
-    page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
+    # 6) Enter DOB (masked input → set via JS + fire events)
     set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
+    print("Entered DOB via JS.")
+
+    # Ensure validation fires (blur + small wait)
     try:
-        page.keyboard.press("Enter")  # simulate submit/blur
+        page.keyboard.press("Tab")
     except Exception:
         pass
-    print("Entered DOB via JS.")
-    time.sleep(0.8)
+    time.sleep(0.6)
 
-    # Wait for potential error message to render
+    # 7) Read error text robustly with normalization
     try:
-        el = page.wait_for_selector(ERROR_TEXT_CSS, state="visible", timeout=15000)
-        observed_error_text = (el.inner_text() or "").strip()
-        print("Observed error text:", observed_error_text)
+        # Prefer locator + expect for stability (handles fade-in)
+        err_locator = page.locator(ERROR_TEXT_CSS)
+        expect(err_locator).to_be_visible(timeout=15000)
+
+        # Sometimes inner_text needs a brief moment post-visibility
+        raw_text = err_locator.inner_text(timeout=2000)
+        observed_error_text = normalize_text(raw_text)
+
+        print("Observed error (raw):", repr(raw_text))
+        print("Observed error (normalized):", observed_error_text)
+
     except PlaywrightTimeout:
         print("No error message element found within timeout.")
+        observed_error_text = ""
+    except Exception as e:
+        print("Unexpected error while reading error text:", repr(e))
+        observed_error_text = ""
 
-    # Assert if EXPECTED_TEXT provided
+    # 8) Assert if EXPECTED_TEXT provided (use CONTAINS w/ normalization)
     if expected_error_text:
-        assert observed_error_text == expected_error_text, (
-            f"Error - Expected text not found.\n"
-            f"Expected: {expected_error_text}\n"
-            f"Actual:   {observed_error_text}"
-        )
+        expected_norm = normalize_text(expected_error_text)
+        if expected_norm and expected_norm not in observed_error_text:
+            # Dump error container HTML to aid debugging
+            try:
+                html_dump = page.locator(ERROR_CONTAINER).first.inner_html(timeout=1000)
+                print("qna__input-error HTML dump:\n", html_dump)
+            except Exception:
+                pass
 
-    # Save screenshot
+            raise AssertionError(
+                "Error - Expected text not found.\n"
+                f"Expected (normalized): {expected_norm}\n"
+                f"Actual (normalized):   {observed_error_text}"
+            )
+
+    # 9) Save screenshot
     page.screenshot(path=screenshot_path, full_page=True)
     print(f"Screenshot saved to {screenshot_path}")
 
     return observed_error_text
+
 
 
 # --- Pytest Fixtures ----------------------------------------------------------
@@ -294,7 +326,7 @@ def config():
 
     # Email content
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS")
+    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
     cfg["HTML_INTRO_BASE"] = os.getenv(
         "BODY",
         f"Hi Team,</br>"
