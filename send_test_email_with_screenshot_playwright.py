@@ -260,8 +260,8 @@ def config():
 
     # Browser
     cfg["HEADLESS"] = os.getenv("HEADLESS", "true").lower() in ("1", "true", "yes")
-    cfg["WINDOW_W"] = int(os.getenv("WINDOW_W", "1366"))
-    cfg["WINDOW_H"] = int(os.getenv("WINDOW_H", "900"))
+    cfg["WINDOW_W"] = int(os.getenv("WINDOW_W", "1920"))
+    cfg["WINDOW_H"] = int(os.getenv("WINDOW_H", "1080"))
 
     # URLs (overridable via env)
     cfg["CS_HK_URL"] = os.getenv("CS_HK_URL", "https://www.claimsimple.hk/#/")
