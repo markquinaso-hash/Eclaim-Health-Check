@@ -210,21 +210,42 @@ def run_claimsimple_flow_playwright(page, *, cs_hk_url, tnc_emc_url, claim_id, c
     page.wait_for_selector(ID_INPUT, state="visible", timeout=30000)
     id_box = page.locator(ID_INPUT).first
     id_box.scroll_into_view_if_needed()
+    id_box.click()                              # ensure focus
     id_box.fill("")
     id_box.fill(claim_id)
-    id_box.press("Enter")
+
+    # Commit value for reactive frameworks
+    id_box.dispatch_event("input")
+    id_box.dispatch_event("change")
+    id_box.dispatch_event("blur")
+
+    # Try element-targeted Enter first
+    try:
+        id_box.press("Enter")
+    except Exception:
+        pass
+
+    # Optional: verify progress; if no expected change, fallback to clicking the next control
+    try:
+        # e.g., DOB becomes attached/visible/enabled shortly
+        page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=2000)
+    except PlaywrightTimeout:
+        # Fallback to clicking Next/Continue (adjust selector to your actual control)
+        # page.locator("text=Continue").first.click()
+        pass
+
     print("Entered ID.")
     time.sleep(0.8)
 
     # 6) Enter DOB (hidden/masked input → set via JS and fire events)
     page.wait_for_selector(DOB_NAME_SELECTOR, state="attached", timeout=30000)
     set_input_value_js(page, DOB_NAME_SELECTOR, claim_dob)
+    # Commit + try Enter
+    page.evaluate("sel => document.querySelector(sel)?.dispatchEvent(new Event('blur', {bubbles:true}))", DOB_NAME_SELECTOR)
     try:
-        page.keyboard.press("Enter")  # simulate submit/blur
+        page.keyboard.press("Enter")
     except Exception:
         pass
-    print("Entered DOB via JS.")
-    time.sleep(0.8)
 
     # Wait for potential error message to render
     try:
