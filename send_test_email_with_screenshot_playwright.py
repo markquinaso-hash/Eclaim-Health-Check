@@ -294,10 +294,12 @@ def config():
 
     # Email content
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "ClaimSimple HK Check – Inline Screenshot")
+    cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS")
     cfg["HTML_INTRO_BASE"] = os.getenv(
         "BODY",
-        f"Hello! Here is the screenshot from the automated ClaimSimple HK flow "
+        f"Hi Team,</br>"
+        f"Good day!</br>"
+        f"We have performed the eClaims health check and no issue encountered.</br>"
         f"(ID/DOB verification).<br><strong>Timestamp:</strong> {now}"
     )
     cfg["TEXT_BODY"] = (

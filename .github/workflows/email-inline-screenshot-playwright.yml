@@ -55,8 +55,8 @@ jobs:
 
           # Browser behavior
           HEADLESS: "true"
-          WINDOW_W: "1366"
-          WINDOW_H: "900"
+          WINDOW_W: "1920"
+          WINDOW_H: "1080"
 
           # App inputs
           CS_HK_URL: "https://www.claimsimple.hk/#/"
@@ -69,8 +69,8 @@ jobs:
           ALWAYS_EMAIL: "true"          # always send an email (in addition to failure)
           EMAIL_ON_FAILURE: "true"      # also email on failure
           USE_SSL_465: "false"          # set true to use SSL (465); false -> STARTTLS (587)
-          SUBJECT: "ClaimSimple HK Check – Inline Screenshot"
-          BODY: "Hello from CI. Inline screenshot attached below."
+          SUBJECT: "GOCC - Health Check - HK eClaims – (0700 HKT) - PASS"
+          BODY: "Hi Team, </br> Good day </br> We have performed the eClaims health check and no issue encountered."
           SCREENSHOT_PATH: "screenshot.png"
         run: |
           # Run only the intended test file (ensure the filename is correct and exists)
