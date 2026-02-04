@@ -18,12 +18,18 @@ Author: MJ
 import os
 import ssl
 import time
+import re
 from datetime import datetime
 from email.message import EmailMessage
 from email.utils import make_msgid
 
 import pytest
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
+from playwright.sync_api import (
+    sync_playwright,
+    TimeoutError as PlaywrightTimeout,
+    Page,
+    expect,
+)
 
 # Optional .env support
 try:
@@ -138,6 +144,15 @@ DOB_INPUT = ".qna__input.aDOB"           # keep for visibility checks if needed
 DOB_NAME_SELECTOR = "input[name='dob']"  # used for JS value set
 ERROR_TEXT_CSS = ".qna__input-error"
 
+# Use the same selector for HTML dump to avoid NameError
+ERROR_CONTAINER = ERROR_TEXT_CSS
+
+def normalize_text(s: str) -> str:
+    """Normalize text for robust contains comparison."""
+    if s is None:
+        return ""
+    return re.sub(r"\s+", " ", s).strip().lower()
+
 
 def set_input_value_js(page, css_selector: str, value: str):
     """
@@ -161,7 +176,6 @@ def set_input_value_js(page, css_selector: str, value: str):
         }""",
         [css_selector, value],
     )
-
 
 
 def run_claimsimple_flow_playwright(
@@ -200,7 +214,7 @@ def run_claimsimple_flow_playwright(
 
     # 2) Click checkbox
     page.locator(CHECKBOX_INPUT).scroll_into_view_if_needed()
-    page.locator(CHECKBOX_INPUT).click()  # .check(force=True) not needed; it's not an <input type=checkbox>
+    page.locator(CHECKBOX_INPUT).click()
     print("Checkbox clicked.")
 
     # 3) Continue
@@ -238,11 +252,9 @@ def run_claimsimple_flow_playwright(
 
     # 7) Read error text robustly with normalization
     try:
-        # Prefer locator + expect for stability (handles fade-in)
         err_locator = page.locator(ERROR_TEXT_CSS)
         expect(err_locator).to_be_visible(timeout=15000)
 
-        # Sometimes inner_text needs a brief moment post-visibility
         raw_text = err_locator.inner_text(timeout=2000)
         observed_error_text = normalize_text(raw_text)
 
@@ -280,7 +292,6 @@ def run_claimsimple_flow_playwright(
     return observed_error_text
 
 
-
 # --- Pytest Fixtures ----------------------------------------------------------
 
 @pytest.fixture(scope="session")
@@ -300,7 +311,6 @@ def config():
     cfg["TNC_EMC_URL"] = os.getenv("TNC_EMC_URL", "https://www.claimsimple.hk/DoctorSearch#/")
 
     # Inputs
-    
     cfg["CLAIM_ID"] = os.getenv("CLAIM_ID", "A0000000")
     cfg["CLAIM_ID_PRESS_ENTER"] = os.getenv("CLAIM_ID_PRESS_ENTER", "true").lower() in ("1", "true", "yes")
     cfg["CLAIM_DOB"] = os.getenv("CLAIM_DOB", "01/01/1990")
@@ -329,7 +339,7 @@ def config():
     cfg["SUBJECT_BASE"] = os.getenv("SUBJECT", "GOCC - Health Check - HK eClaims – (0700 HKT)")
     cfg["HTML_INTRO_BASE"] = os.getenv(
         "BODY",
-        f"Hi Team,</br>"
+        f"Hi Team</br>"
         f"Good day!</br>"
         f"We have performed the eClaims health check and no issue encountered.</br>"
         f"(ID/DOB verification).<br><strong>Timestamp:</strong> {now}"
