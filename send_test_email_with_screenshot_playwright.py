@@ -321,7 +321,7 @@ def run_claimsimple_flow_playwright(
 
         # Extra stabilization delay so the UI finishes rendering (animations, layout, etc.)
         if post_assert_delay_ms and post_assert_delay_ms > 0:
-            time.sleep(post_assert_delay_ms / 1000.0)
+            time.sleep(post_assert_delay_ms / 3000.0)
 
     # Ensure screenshot directory exists
     try:
@@ -401,7 +401,7 @@ def config():
     )
 
     # Post-assert wait (ms) before taking the screenshot
-    cfg["POST_ASSERT_DELAY_MS"] = int(os.getenv("POST_ASSERT_DELAY_MS", "1000"))
+    cfg["POST_ASSERT_DELAY_MS"] = int(os.getenv("POST_ASSERT_DELAY_MS", "3000"))
 
     return cfg
 
